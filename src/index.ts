@@ -62,9 +62,16 @@ async function main(): Promise<void> {
     });
   });
 
+  const corsOrigin = parseCorsOrigins(config.corsOrigins);
+  const corsCredentials = config.corsOrigins.trim() !== "*";
+  console.info(
+    "[sapai-server] CORS:",
+    corsOrigin === true ? "* (all origins, credentials off)" : corsOrigin,
+    corsCredentials ? "(credentials on)" : "",
+  );
   await fastify.register(cors, {
-    origin: parseCorsOrigins(config.corsOrigins),
-    credentials: config.corsOrigins.trim() !== "*",
+    origin: corsOrigin,
+    credentials: corsCredentials,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Authorization", "Content-Type", "x-api-key", "x-embed-token"],
   });
