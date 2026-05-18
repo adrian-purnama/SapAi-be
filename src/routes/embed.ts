@@ -11,6 +11,11 @@ import {
   isEmbedTokenActive,
 } from "../services/faqConstantsService.js";
 import { toAbsoluteUrlFromRequest } from "../utils/publicOriginFromRequest.js";
+import {
+  isRecaptchaConfigured,
+  RECAPTCHA_EMBED_CHAT_ACTION,
+  verifyRecaptchaToken,
+} from "../utils/recaptcha.js";
 
 const MODEL_LABELS = ALLOWED_CHAT_MODEL_IDS.map((m) => m.label) as unknown as [string, ...string[]];
 const modelEnum = z.enum(MODEL_LABELS);
@@ -18,6 +23,7 @@ const modelEnum = z.enum(MODEL_LABELS);
 const embedChatBodySchema = z.object({
   message: z.string().trim().min(1, "Message cannot be empty"),
   model: modelEnum.optional(),
+  recaptchaToken: z.string().trim().optional(),
 });
 
 function readEmbedTokenFromRequest(request: FastifyRequest): string {
@@ -78,6 +84,21 @@ export async function registerEmbedRoutes(fastify: FastifyInstance): Promise<voi
           issues: parsed.error.flatten(),
         });
       }
+
+      if (isRecaptchaConfigured()) {
+        const remoteIp = request.ip?.trim() || undefined;
+        const recaptcha = await verifyRecaptchaToken(parsed.data.recaptchaToken, {
+          remoteIp,
+          expectedAction: RECAPTCHA_EMBED_CHAT_ACTION,
+        });
+        if (!recaptcha.ok) {
+          return reply.code(400).send({
+            message: recaptcha.message,
+            code: recaptcha.code,
+          });
+        }
+      }
+
       const auth = request.apiAuth!;
 
       //TODO:model here is predefined ?

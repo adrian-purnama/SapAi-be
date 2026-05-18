@@ -12,6 +12,7 @@ import { releaseStaleRunningChatJobs } from "./releaseStaleRunningChatJobs.js";
 import { getPlanBySlugFromRegistry } from "../services/planRegistry.js";
 import type { FaqChunkHit } from "../qdrant/faqChunks.js";
 import { searchFaqChunks } from "../qdrant/faqChunks.js";
+import { searchFaqChunksBm25 } from "../services/faqBm25Search.js";
 import { notifyChatJobUpdated } from "../ws/chatJobStatusHub.js";
 
 /**
@@ -53,6 +54,44 @@ function resolveDeepSeekMainChatRouting(params: {
 
 function runErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+const RAG_CONTEXT_LIMIT = 5;
+const RAG_RETRIEVAL_POOL = 20;
+const RAG_RRF_K = 60;
+
+function ragChunkHitKey(hit: FaqChunkHit): string {
+  const id = hit.chunkId?.trim();
+  if (id) return id;
+  return hit.text.trim().slice(0, 512);
+}
+
+/** Reciprocal rank fusion of dense (Qdrant) and sparse (BM25) lists. */
+function mergeRagRetrievalHits(denseHits: FaqChunkHit[], bm25Hits: FaqChunkHit[]): FaqChunkHit[] {
+  const fused = new Map<string, { hit: FaqChunkHit; score: number }>();
+
+  const addList = (list: FaqChunkHit[]) => {
+    list.forEach((hit, rank) => {
+      const key = ragChunkHitKey(hit);
+      if (!key) return;
+      const rrf = 1 / (RAG_RRF_K + rank + 1);
+      const prev = fused.get(key);
+      if (prev) {
+        prev.score += rrf;
+        if (!prev.hit.text.trim() && hit.text.trim()) prev.hit = hit;
+      } else {
+        fused.set(key, { hit, score: rrf });
+      }
+    });
+  };
+
+  addList(denseHits);
+  addList(bm25Hits);
+
+  return [...fused.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, RAG_CONTEXT_LIMIT)
+    .map(({ hit, score }) => ({ ...hit, score }));
 }
 
 async function markJobFailedFromRunning(
@@ -151,40 +190,56 @@ export async function runChatJobById(jobId: string): Promise<void> {
       ragQuestion = question;
       if (question) {
         try {
+          const apiKeyId = String(doc.apiKeyId);
           const embedModel = readOllamaEmbedModel();
-          const emb = await callOllamaEmbed({ baseUrl, model: embedModel, input: question });
-          const qvec = emb.embeddings?.[0];
-          if (Array.isArray(qvec) && qvec.length > 0) {
-            const hits = await searchFaqChunks({
-              apiKeyId: String(doc.apiKeyId),
-              vector: qvec,
-              limit: 5,
+          console.log(`[RAG dev] embedding model: fetching BM25 and dense`);
+          const [denseHits, bm25Hits] = await Promise.all([
+            (async (): Promise<FaqChunkHit[]> => {
+              const emb = await callOllamaEmbed({ baseUrl, model: embedModel, input: question });
+              const qvec = emb.embeddings?.[0];
+              if (!Array.isArray(qvec) || qvec.length === 0) return [];
+              return searchFaqChunks({
+                apiKeyId,
+                vector: qvec,
+                limit: RAG_RETRIEVAL_POOL,
+              });
+            })(),
+            searchFaqChunksBm25({
+              apiKeyId,
+              query: question,
+              limit: RAG_RETRIEVAL_POOL,
+            }),
+          ]);
+
+          console.log(`[RAG dev] embedding model: merging BM25 and dense`);
+
+          const hits = mergeRagRetrievalHits(denseHits, bm25Hits);
+          if (hits.length > 0) {
+            ragRetrievalHits = hits;
+            const context = hits
+              .map((h, i) => `[#${i + 1} score=${h.score.toFixed(3)}]\n${h.text}`)
+              .join("\n\n---\n\n");
+
+            const lastUserIndex = (() => {
+              for (let i = messages.length - 1; i >= 0; i -= 1) {
+                if (messages[i]?.role === "user") return i;
+              }
+              return messages.length - 1;
+            })();
+
+            console.log(context);
+
+            messages.unshift({
+              role: "system",
+              content:
+                "You are a helpful assistant. Answer short, clear, and helpful. " +
+                "Use provided FAQ context when relevant. If the context does not contain the answer, say you don't know.",
             });
-            if (hits.length > 0) {
-              ragRetrievalHits = hits;
-              const context = hits
-                .map((h, i) => `[#${i + 1} score=${h.score.toFixed(3)}]\n${h.text}`)
-                .join("\n\n---\n\n");
 
-              const lastUserIndex = (() => {
-                for (let i = messages.length - 1; i >= 0; i -= 1) {
-                  if (messages[i]?.role === "user") return i;
-                }
-                return messages.length - 1;
-              })();
-
-              messages.unshift({
-                role: "system",
-                content:
-                  "You are a helpful assistant. Answer short, clear, and helpful. " +
-                  "Use provided FAQ context when relevant. If the context does not contain the answer, say you don't know.",
-              });
-
-              messages.splice(lastUserIndex + 1, 0, {
-                role: "system",
-                content: `FAQ context:\n\n${context}`,
-              });
-            }
+            messages.splice(lastUserIndex + 1, 0, {
+              role: "system",
+              content: `FAQ context:\n\n${context}`,
+            });
           }
         } catch (e) {
           console.log("[RAG dev] retrieval error:", e);
