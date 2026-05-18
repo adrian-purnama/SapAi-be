@@ -1,15 +1,10 @@
 import { FaqConstantModel } from "../models/faqConstant.js";
-import { hashEmbedToken } from "./embedTokenHash.js";
 
-/** Resolve embed settings by plaintext token (hashed or legacy plaintext in DB). */
+/** Resolve embed settings by plaintext token. */
 export function findFaqConstantByEmbedTokenQuery(rawToken: string): Record<string, unknown> | null {
   const token = rawToken.trim();
   if (!token) return null;
-  const hash = hashEmbedToken(token);
-  return {
-    embedEnabled: true,
-    $or: [{ embedTokenHash: hash }, { embedToken: token }],
-  };
+  return { embedEnabled: true, embedToken: token };
 }
 
 export async function findFaqConstantByEmbedToken(rawToken: string) {

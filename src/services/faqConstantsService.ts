@@ -27,7 +27,6 @@ import {
   type EmbedAppBadgePolicy,
 } from "../utils/planAccess.js";
 import { resolvePlanForUser } from "../services/planRegistry.js";
-import { hashEmbedToken } from "../utils/embedTokenHash.js";
 import { findFaqConstantByEmbedTokenQuery } from "../utils/embedTokenLookup.js";
 
 function norm(s: string): string {
@@ -268,15 +267,13 @@ export async function getFaqEmbedFlags(
 ): Promise<FaqEmbedFlags> {
   const resolve = options?.resolveFileUrl ?? ((p: string | null) => p);
   const doc = await FaqConstantModel.findOne({ userId, apiKeyId })
-    .select("embedEnabled embedToken embedTokenHash embedAllowedOrigins embedInfo")
+    .select("embedEnabled embedToken embedAllowedOrigins embedInfo")
     .lean();
   const raw = Array.isArray(doc?.embedAllowedOrigins) ? doc.embedAllowedOrigins.map((x) => String(x)) : [];
   const allowedOrigins = [...new Set(raw.map((x) => x.trim()).filter(Boolean))];
-  const hasHash = typeof doc?.embedTokenHash === "string" && doc.embedTokenHash.length > 0;
-  const legacyToken =
+  const token =
     typeof doc?.embedToken === "string" && doc.embedToken.trim().length > 0 ? doc.embedToken.trim() : null;
-  const token = legacyToken;
-  const hasToken = hasHash || Boolean(legacyToken);
+  const hasToken = Boolean(token);
   const info = doc?.embedInfo;
   const policy = await getEmbedAppBadgePolicyForUser(userId);
   const branding = embedInfoToBrandingPayload(info, resolve, policy);
@@ -340,8 +337,7 @@ export async function rotateEmbedToken(
   await assertUserPlanAllowsPublicEmbed(userId);
   const raw = `et_${crypto.randomBytes(24).toString("hex")}`;
   const doc = await loadOrCreateDoc(userId, apiKeyId);
-  doc.set("embedTokenHash", hashEmbedToken(raw));
-  doc.set("embedToken", null);
+  doc.set("embedToken", raw);
   doc.set("embedTokenCreatedAt", new Date());
   await doc.save();
   const flags = await getFaqEmbedFlags(userId, apiKeyId, { resolveFileUrl });

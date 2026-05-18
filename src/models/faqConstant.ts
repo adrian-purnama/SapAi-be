@@ -102,9 +102,8 @@ const faqConstantSchema = new mongoose.Schema(
     },
 
     embedEnabled: { type: Boolean, default: false, index: true },
-    /** @deprecated Legacy plaintext; new tokens use embedTokenHash only. */
+    /** Public embed scope token (owner APIs return plaintext; also in embed URLs). */
     embedToken: { type: String, default: null, maxlength: 160 },
-    embedTokenHash: { type: String, default: null, maxlength: 64 },
     embedTokenCreatedAt: { type: Date, default: null },
     embedAllowedOrigins: {
       type: [String],
@@ -124,7 +123,6 @@ const faqConstantSchema = new mongoose.Schema(
 
 faqConstantSchema.index({ userId: 1, apiKeyId: 1 }, { unique: true });
 faqConstantSchema.index({ embedToken: 1 }, { unique: true, sparse: true });
-faqConstantSchema.index({ embedTokenHash: 1 }, { unique: true, sparse: true });
 
 faqConstantSchema.pre("save", function normalizeCategories(next) {
   const raw = this.categories as string[] | undefined;
