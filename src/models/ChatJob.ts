@@ -54,7 +54,6 @@ const chatJobRagAnalysisSchema = new mongoose.Schema(
   { _id: false },
 );
 
-
 const chatJobSchema = new mongoose.Schema(
   {
     userId: {

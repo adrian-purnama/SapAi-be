@@ -10,6 +10,10 @@ import {
   getPublicEmbedBrandingForActiveToken,
   isEmbedTokenActive,
 } from "../services/faqConstantsService.js";
+import {
+  recordEmbedVisitSafe,
+  resolveEmbedVisitScope,
+} from "../services/recordEmbedVisit.js";
 import { toAbsoluteUrlFromRequest } from "../utils/publicOriginFromRequest.js";
 import {
   isRecaptchaConfigured,
@@ -44,6 +48,18 @@ export async function registerEmbedRoutes(fastify: FastifyInstance): Promise<voi
     const active = await isEmbedTokenActive(token);
     if (!active) {
       return reply.code(404).send({ message: "Embed not found or disabled.", code: "EMBED_INACTIVE" });
+    }
+    const visitScope = await resolveEmbedVisitScope(token);
+    if (visitScope) {
+      recordEmbedVisitSafe(
+        {
+          apiKeyId: visitScope.apiKeyId,
+          userId: visitScope.userId,
+          request,
+          kind: "status",
+        },
+        request.log,
+      );
     }
     const resolveFileUrl = (p: string | null) => toAbsoluteUrlFromRequest(request, p);
     const branding = await getPublicEmbedBrandingForActiveToken(token, resolveFileUrl);
@@ -121,6 +137,16 @@ export async function registerEmbedRoutes(fastify: FastifyInstance): Promise<voi
         }
         throw err;
       }
+
+      recordEmbedVisitSafe(
+        {
+          apiKeyId: auth.apiKeyId,
+          userId: auth.userId,
+          request,
+          kind: "chat",
+        },
+        request.log,
+      );
 
       return {
         ok: true,
