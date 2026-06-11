@@ -4,7 +4,7 @@ import { startChatJobRunner } from "../jobs/chatJobRunner.js";
 import { runChatJobById } from "../jobs/runChatJobById.js";
 import { ChatJobModel } from "../models/ChatJob.js";
 import { MAX_CHAT_MAX_TOKENS } from "../constants/chatLimits.js";
-import type { ChatJobCreateBody } from "../schemas/chatJobBody.js";
+import type { NormalizedChatJobCreateBody } from "../schemas/chatJobBody.js";
 import type { ApiKeyAuthContext } from "../types/authContext.js";
 import { getPlanBySlugFromRegistry, resolvePlanForUser } from "../services/planRegistry.js";
 import { UserModel } from "../models/User.js";
@@ -23,7 +23,7 @@ export type CreatedChatJobPayload = {
  */
 export async function createAndQueueChatJob(
   auth: ApiKeyAuthContext,
-  body: ChatJobCreateBody,
+  body: NormalizedChatJobCreateBody,
   log?: { error: (obj: Record<string, unknown>, msg: string) => void },
 ): Promise<CreatedChatJobPayload> {
   await assertChatInputWithinPlanLimits(auth.userId, body.input);

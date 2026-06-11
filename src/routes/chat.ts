@@ -7,7 +7,11 @@ import { authenticatePlainApiKey, headerString, requireApiKey } from "../auth/re
 import { consumeWsStreamTicket, issueWsStreamTicket } from "../auth/wsStreamTicket.js";
 import { ALLOWED_CHAT_MODEL_IDS } from "../constants/chatModels.js";
 import { ChatJobModel, CHAT_JOB_STATUS_VALUES } from "../models/ChatJob.js";
-import { CHAT_TASK_TYPES, chatJobCreateBodySchema } from "../schemas/chatJobBody.js";
+import {
+  CHAT_TASK_TYPES,
+  chatJobCreateBodySchema,
+  normalizeChatJobCreateBody,
+} from "../schemas/chatJobBody.js";
 import { createAndQueueChatJob } from "../services/createChatJobFromAuth.js";
 import { PlanLimitError } from "../utils/planChatLimits.js";
 import { buildStructuredOutputSystemPrompt } from "../utils/buildStructuredOutputSystemPrompt.js";
@@ -44,22 +48,34 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
       });
     }
 
-    const body = parsed.data;
     const auth = request.apiAuth!;
+    const raw = parsed.data;
 
-    const template = body.outputJsonTemplate?.trim();
-    const jobInput =
-      template && template.length > 0
-        ? [
+    let merged;
+    try {
+      const body = await normalizeChatJobCreateBody(raw, auth.userId);
+
+      let jobInput = body.input;
+      if (raw.taskType !== "translate") {
+        const template = raw.outputJsonTemplate?.trim();
+        if (template && template.length > 0) {
+          jobInput = [
             {
               role: "system" as const,
               content: buildStructuredOutputSystemPrompt(template),
             },
             ...body.input,
-          ]
-        : body.input;
+          ];
+        }
+      }
 
-    const merged = { ...body, input: jobInput };
+      merged = { ...body, input: jobInput };
+    } catch (err) {
+      if (err instanceof PlanLimitError) {
+        return reply.code(400).send({ message: err.message, code: err.code });
+      }
+      throw err;
+    }
 
     let created;
     try {

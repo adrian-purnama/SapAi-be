@@ -46,6 +46,20 @@ function planToPublicLimits(plan: PlanSnapshot): NonNullable<PlanUsageLimits["pl
   };
 }
 
+/** Enforces `Plan.maxCharacterPerMessage` on translate `text` (before prompt expansion). */
+export async function assertTranslateTextWithinPlanLimits(userId: string, text: string): Promise<void> {
+  const { maxCharacterPerMessage } = await getPlanUsageLimitsForUser(userId);
+  const content = text.trim();
+  if (!content) {
+    throw new PlanLimitError("text cannot be empty.", "EMPTY_MESSAGE");
+  }
+  if (content.length > maxCharacterPerMessage) {
+    throw new PlanLimitError(
+      `text exceeds your plan limit of ${maxCharacterPerMessage} characters (${content.length} given).`,
+    );
+  }
+}
+
 /** Enforces `Plan.maxCharacterPerMessage` on every message in `input` (chat + RAG). */
 export async function assertChatInputWithinPlanLimits(
   userId: string,
