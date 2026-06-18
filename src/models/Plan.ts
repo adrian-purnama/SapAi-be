@@ -32,6 +32,8 @@ const planSchema = new mongoose.Schema(
     rateLimitPerMinute: { type: Number, required: true, min: 0, max: 1_000_000, default: 60 },
     /** Max characters per chat message in `input[].content`. */
     maxCharacterPerMessage: { type: Number, required: true, min: 1, max: 1_000_000, default: 2000 },
+    /** Max in-flight chat jobs per user (`pending` + `queued` + `running`). `0` = unlimited. */
+    maxChatInFlight: { type: Number, required: true, min: 0, max: 10_000, default: 5 },
 
     maxApiKeys: { type: Number, required: true, min: 0 },
     /** Max RAG PDF files per API key / project. */

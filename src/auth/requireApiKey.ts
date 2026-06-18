@@ -51,6 +51,7 @@ export async function authenticatePlainApiKey(
   rawKey: string,
   request: FastifyRequest,
 ): Promise<{ ok: true; ctx: ApiKeyAuthContext } | { ok: false; failure: ApiKeyAuthFailure }> {
+  // 1. Require a non-empty API key (x-api-key header or equivalent).
   const key = rawKey.trim();
   if (!key) {
     return {
@@ -59,6 +60,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
+  // 2. Require MongoDB — auth lookups depend on ApiKey / User collections.
   if (mongoose.connection.readyState !== 1) {
     return {
       ok: false,
@@ -69,6 +71,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
+  // 3. Resolve API key: SHA-256 hash match, must exist and not be revoked.
   const hashedKey = sha256Hex(key);
   const apiKey = await ApiKeyModel.findOne({ hashedKey, revokedAt: null });
   if (!apiKey) {
@@ -78,6 +81,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
+  // 4. Reject disabled keys (e.g. extra keys on plans that only allow one active key).
   if (apiKey.isDisabled) {
     return {
       ok: false,
@@ -91,6 +95,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
+  // 5. Load owning user — key is invalid if the account row is missing.
   const user = await UserModel.findById(apiKey.userId);
   if (!user) {
     return {
@@ -98,6 +103,8 @@ export async function authenticatePlainApiKey(
       failure: { status: 401, body: { message: "User not found.", code: "USER_NOT_FOUND" } },
     };
   }
+
+  // 6. Reject blocked accounts.
   if (user.isBlocked) {
     return {
       ok: false,
@@ -105,6 +112,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
+  // 7. Rate limit per API key, cap derived from the user's plan.
   const perMinute = getRateLimitPerMinuteForUserPlan(user.plan);
   if (!(await tryConsumeApiKeyRateSlot(apiKey._id.toString(), perMinute))) {
     return {
@@ -119,6 +127,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
+  // 8. IP allowlist — skipped when empty or when allowlist contains 0.0.0.0 (allow all).
   const allowlist = (apiKey.ipAllowlist ?? []).map((s) => String(s).trim()).filter(Boolean);
   if (allowlist.length > 0 && !allowlistAllowsAll(allowlist)) {
     const ip = getClientIp(request);
@@ -130,10 +139,12 @@ export async function authenticatePlainApiKey(
     }
   }
 
+  // 9. Success — record last use (fire-and-forget).
   void ApiKeyModel.updateOne({ _id: apiKey._id }, { $set: { lastUsedAt: new Date() } }).catch(
     () => undefined,
   );
 
+  // 10. Build request auth context for downstream handlers.
   const ctx: ApiKeyAuthContext = {
     apiKeyId: apiKey._id.toString(),
     userId: user._id.toString(),

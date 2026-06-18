@@ -1,4 +1,7 @@
+import mongoose from "mongoose";
+
 import { UserModel } from "../models/User.js";
+import { ChatJobModel, CHAT_JOB_IN_FLIGHT_STATUSES } from "../models/ChatJob.js";
 import { getRateLimitPerMinuteForUserPlan } from "../auth/apiKeyRateLimit.js";
 import { resolvePlanForUser, type PlanSnapshot } from "../services/planRegistry.js";
 
@@ -18,10 +21,12 @@ export type PlanUsageLimits = {
     name: string;
     rateLimitPerMinute: number;
     maxCharacterPerMessage: number;
+    maxChatInFlight: number;
   } | null;
   /** Effective req/min cap (plan value or env fallback). */
   rateLimitPerMinute: number;
   maxCharacterPerMessage: number;
+  maxChatInFlight: number;
 };
 
 export async function getPlanUsageLimitsForUser(userId: string): Promise<PlanUsageLimits> {
@@ -29,11 +34,13 @@ export async function getPlanUsageLimitsForUser(userId: string): Promise<PlanUsa
   const plan = resolvePlanForUser(user?.plan);
   const rateLimitPerMinute = getRateLimitPerMinuteForUserPlan(user?.plan);
   const maxCharacterPerMessage = plan?.maxCharacterPerMessage ?? 2000;
+  const maxChatInFlight = plan?.maxChatInFlight ?? 5;
 
   return {
     plan: plan ? planToPublicLimits(plan) : null,
     rateLimitPerMinute,
     maxCharacterPerMessage,
+    maxChatInFlight,
   };
 }
 
@@ -43,6 +50,7 @@ function planToPublicLimits(plan: PlanSnapshot): NonNullable<PlanUsageLimits["pl
     name: plan.name,
     rateLimitPerMinute: plan.rateLimitPerMinute,
     maxCharacterPerMessage: plan.maxCharacterPerMessage,
+    maxChatInFlight: plan.maxChatInFlight,
   };
 }
 
@@ -77,5 +85,23 @@ export async function assertChatInputWithinPlanLimits(
         `Message ${i + 1} exceeds your plan limit of ${maxCharacterPerMessage} characters (${content.length} given).`,
       );
     }
+  }
+}
+
+/** Enforces `Plan.maxChatInFlight` on the user's in-flight jobs (`pending` + `queued` + `running`). */
+export async function assertChatInFlightWithinPlanLimits(userId: string): Promise<void> {
+  const { maxChatInFlight } = await getPlanUsageLimitsForUser(userId);
+  if (maxChatInFlight === 0) return;
+
+  const count = await ChatJobModel.countDocuments({
+    userId: new mongoose.Types.ObjectId(userId),
+    status: { $in: CHAT_JOB_IN_FLIGHT_STATUSES },
+  });
+
+  if (count >= maxChatInFlight) {
+    throw new PlanLimitError(
+      `Your plan allows at most ${maxChatInFlight} in-flight chat job(s). Wait for existing jobs to finish or upgrade your plan.`,
+      "TOO_MANY_IN_FLIGHT_JOBS",
+    );
   }
 }

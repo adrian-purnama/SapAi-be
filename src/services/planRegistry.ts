@@ -13,6 +13,7 @@ export type PlanSnapshot = {
   isPriority: boolean;
   rateLimitPerMinute: number;
   maxCharacterPerMessage: number;
+  maxChatInFlight: number;
   maxApiKeys: number;
   maxPdfUpload: number;
   maxPdfMb: number;
@@ -51,6 +52,7 @@ export function planDocToSnapshot(doc: PlanDoc): PlanSnapshot {
     isPriority: Boolean(doc.isPriority),
     rateLimitPerMinute: Number(doc.rateLimitPerMinute ?? 60),
     maxCharacterPerMessage: Number(doc.maxCharacterPerMessage ?? 2000),
+    maxChatInFlight: Number(doc.maxChatInFlight ?? 5),
     maxApiKeys: Number(doc.maxApiKeys),
     maxPdfUpload: Number(doc.maxPdfUpload),
     maxPdfMb: Number(doc.maxPdfMb),

@@ -10,6 +10,7 @@ export type PlanPublicSnapshot = {
   isPriority: boolean;
   rateLimitPerMinute: number;
   maxCharacterPerMessage: number;
+  maxChatInFlight: number;
   maxPdfUpload: number;
   maxPdfMb: number;
 };
@@ -24,6 +25,7 @@ export function planToPublicSnapshot(plan: PlanSnapshot): PlanPublicSnapshot {
     isPriority: plan.isPriority,
     rateLimitPerMinute: plan.rateLimitPerMinute,
     maxCharacterPerMessage: plan.maxCharacterPerMessage,
+    maxChatInFlight: plan.maxChatInFlight,
     maxPdfUpload: plan.maxPdfUpload,
     maxPdfMb: plan.maxPdfMb,
   };

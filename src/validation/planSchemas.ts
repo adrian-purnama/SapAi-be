@@ -18,6 +18,7 @@ export const planCreateBodySchema = z.object({
   isPriority: z.boolean().optional().default(false),
   rateLimitPerMinute: z.number().int().min(0).max(1_000_000),
   maxCharacterPerMessage: z.number().int().min(1).max(1_000_000),
+  maxChatInFlight: z.number().int().min(0).max(10_000),
   maxApiKeys: z.number().int().min(0),
   maxPdfUpload: z.number().int().min(0),
   maxPdfMb: z.number().int().min(1).max(512),

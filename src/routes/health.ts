@@ -86,6 +86,7 @@ export async function registerHealthRoutes(fastify: FastifyInstance): Promise<vo
       currentPlan: limits.plan?.name ?? null,
       rateLimitPerMinute: limits.rateLimitPerMinute,
       maxCharacterPerMessage: limits.maxCharacterPerMessage,
+      maxChatInFlight: limits.maxChatInFlight,
     };
   });
 }

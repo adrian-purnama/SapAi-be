@@ -106,6 +106,37 @@ function logDeepSeekRoutingWarnings(
   }
 }
 
+function withGuardrails(messages: RunnerMessage[]): RunnerMessage[] {
+  const out = [...messages];
+  out.unshift({ role: "system", content: CHAT_SYSTEM_GUARDRAILS });
+  return out;
+}
+
+async function runRoutedMainCompletion(
+  ctx: ChatJobRunnerContext,
+  messages: RunnerMessage[],
+  logPrefix: string,
+): Promise<CompletionOut> {
+  const { doc } = ctx;
+  const resolvedModelId = resolveAllowedChatModelId(doc);
+  const { baseUrl, temperature, think } = readOllamaEnv();
+
+  const runningCount = await ChatJobModel.countDocuments({ status: "running" });
+  const jobPlanSlug = String(doc.get("plan") ?? "unknown");
+  const { useDeepSeek, threshold } = resolveDeepSeekMainChatRouting({ runningCount, jobPlanSlug });
+  logDeepSeekRoutingWarnings(logPrefix, runningCount, threshold, useDeepSeek, jobPlanSlug);
+
+  return runMainCompletion({
+    doc,
+    messages,
+    resolvedModelId,
+    useDeepSeek,
+    baseUrl,
+    temperature,
+    think,
+  });
+}
+
 async function runMainCompletion(params: {
   doc: ChatJobDocument;
   messages: RunnerMessage[];
@@ -203,33 +234,11 @@ async function finalizeStillRunningFromWorker(jobId: mongoose.Types.ObjectId): P
 }
 
 async function runChatTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
-  const { doc, jobObjectId } = ctx;
+  const { jobObjectId } = ctx;
   const logPrefix = "[runChatTaskJob]";
 
-  const messages = mapJobInputToMessages(doc);
-  messages.unshift({
-    role: "system",
-    content: CHAT_SYSTEM_GUARDRAILS,
-  });
-
-  const resolvedModelId = resolveAllowedChatModelId(doc);
-  const { baseUrl, temperature, think } = readOllamaEnv();
-
-  const runningCount = await ChatJobModel.countDocuments({ status: "running" });
-  const jobPlanSlug = String(doc.get("plan") ?? "unknown");
-  const { useDeepSeek, threshold } = resolveDeepSeekMainChatRouting({ runningCount, jobPlanSlug });
-  logDeepSeekRoutingWarnings(logPrefix, runningCount, threshold, useDeepSeek, jobPlanSlug);
-
-  const out = await runMainCompletion({
-    doc,
-    messages,
-    resolvedModelId,
-    useDeepSeek,
-    baseUrl,
-    temperature,
-    think,
-  });
-
+  const messages = withGuardrails(mapJobInputToMessages(ctx.doc));
+  const out = await runRoutedMainCompletion(ctx, messages, logPrefix);
   await persistCompletedFull(jobObjectId, out, logPrefix);
 }
 
@@ -271,102 +280,74 @@ function mergeRagRetrievalHits(denseHits: FaqChunkHit[], bm25Hits: FaqChunkHit[]
     .map(({ hit, score }) => ({ ...hit, score }));
 }
 
-async function runRagTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
-  const { doc, jobObjectId } = ctx;
-  const logPrefix = "[runRagTaskJob]";
-
-  const messages = mapJobInputToMessages(doc);
-  const { baseUrl, temperature, think } = readOllamaEnv();
-
-  let ragQuestion = "";
-  let ragRetrievalHits: FaqChunkHit[] = [];
-
+function findLastUserMessage(messages: RunnerMessage[]): string {
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const question = (lastUser?.content || messages[messages.length - 1]?.content || "").trim();
-  ragQuestion = question;
+  return (lastUser?.content || messages[messages.length - 1]?.content || "").trim();
+}
 
-  if (question) {
-    try {
-      const apiKeyId = String(doc.apiKeyId);
-      const embedModel = readOllamaEmbedModel();
-      console.log(`[RAG dev] embedding model: fetching BM25 and dense`);
-      const [denseHits, bm25Hits] = await Promise.all([
-        (async (): Promise<FaqChunkHit[]> => {
-          const emb = await callOllamaEmbed({ baseUrl, model: embedModel, input: question });
-          const qvec = emb.embeddings?.[0];
-          if (!Array.isArray(qvec) || qvec.length === 0) return [];
-          return searchFaqChunks({
-            apiKeyId,
-            vector: qvec,
-            limit: RAG_RETRIEVAL_POOL,
-          });
-        })(),
-        searchFaqChunksBm25({
-          apiKeyId,
-          query: question,
-          limit: RAG_RETRIEVAL_POOL,
-        }),
-      ]);
-
-      console.log(`[RAG dev] embedding model: merging BM25 and dense`);
-
-      const hits = mergeRagRetrievalHits(denseHits, bm25Hits);
-      if (hits.length > 0) {
-        ragRetrievalHits = hits;
-        const context = hits
-          .map((h, i) => `[#${i + 1} score=${h.score.toFixed(3)}]\n${h.text}`)
-          .join("\n\n---\n\n");
-
-        const lastUserIndex = (() => {
-          for (let i = messages.length - 1; i >= 0; i -= 1) {
-            if (messages[i]?.role === "user") return i;
-          }
-          return messages.length - 1;
-        })();
-
-        console.log(context);
-
-        messages.unshift({
-          role: "system",
-          content:
-            "You are a helpful assistant. Answer short, clear, and helpful. " +
-            "Use provided FAQ context when relevant. If the context does not contain the answer, say you don't know.",
-        });
-
-        messages.splice(lastUserIndex + 1, 0, {
-          role: "system",
-          content: `FAQ context:\n\n${context}`,
-        });
-      }
-    } catch (e) {
-      console.log("[RAG dev] retrieval error:", e);
-    }
+function lastUserMessageIndex(messages: RunnerMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") return i;
   }
+  return messages.length - 1;
+}
+
+async function retrieveRagHits(
+  apiKeyId: string,
+  question: string,
+  baseUrl: string,
+): Promise<FaqChunkHit[]> {
+  const embedModel = readOllamaEmbedModel();
+  console.log(`[RAG dev] embedding model: fetching BM25 and dense`);
+  const [denseHits, bm25Hits] = await Promise.all([
+    (async (): Promise<FaqChunkHit[]> => {
+      const emb = await callOllamaEmbed({ baseUrl, model: embedModel, input: question });
+      const qvec = emb.embeddings?.[0];
+      if (!Array.isArray(qvec) || qvec.length === 0) return [];
+      return searchFaqChunks({
+        apiKeyId,
+        vector: qvec,
+        limit: RAG_RETRIEVAL_POOL,
+      });
+    })(),
+    searchFaqChunksBm25({
+      apiKeyId,
+      query: question,
+      limit: RAG_RETRIEVAL_POOL,
+    }),
+  ]);
+
+  console.log(`[RAG dev] embedding model: merging BM25 and dense`);
+  return mergeRagRetrievalHits(denseHits, bm25Hits);
+}
+
+function injectRagContext(messages: RunnerMessage[], hits: FaqChunkHit[]): void {
+  if (hits.length === 0) return;
+
+  const context = hits
+    .map((h, i) => `[#${i + 1} score=${h.score.toFixed(3)}]\n${h.text}`)
+    .join("\n\n---\n\n");
+
+  console.log(context);
 
   messages.unshift({
     role: "system",
-    content: CHAT_SYSTEM_GUARDRAILS,
+    content:
+      "You are a helpful assistant. Answer short, clear, and helpful. " +
+      "Use provided FAQ context when relevant. If the context does not contain the answer, say you don't know.",
   });
 
-  const resolvedModelId = resolveAllowedChatModelId(doc);
-
-  const runningCount = await ChatJobModel.countDocuments({ status: "running" });
-  const jobPlanSlug = String(doc.get("plan") ?? "unknown");
-  const { useDeepSeek, threshold } = resolveDeepSeekMainChatRouting({ runningCount, jobPlanSlug });
-  logDeepSeekRoutingWarnings(logPrefix, runningCount, threshold, useDeepSeek, jobPlanSlug);
-
-  const out = await runMainCompletion({
-    doc,
-    messages,
-    resolvedModelId,
-    useDeepSeek,
-    baseUrl,
-    temperature,
-    think,
+  messages.splice(lastUserMessageIndex(messages) + 1, 0, {
+    role: "system",
+    content: `FAQ context:\n\n${context}`,
   });
+}
 
-  console.log("[RAG dev] generatedAnswer:\n" + (out.text ?? ""));
-
+async function persistRagPartial(
+  jobObjectId: mongoose.Types.ObjectId,
+  out: CompletionOut,
+  logPrefix: string,
+): Promise<boolean> {
   const chatTotalTokens = out.promptTokens + out.completionTokens;
   const partialRes = await ChatJobModel.updateOne(
     { _id: jobObjectId, status: "running" },
@@ -386,14 +367,14 @@ async function runRagTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
   );
   if (partialRes.matchedCount === 0) {
     console.warn(`${logPrefix} RAG partial persist skipped (job not running); id=${String(jobObjectId)}`);
-    return;
+    return false;
   }
   console.log("[RAG dev] persisted answer (chat tokens only); running classifier");
   void notifyChatJobUpdated(String(jobObjectId));
+  return true;
+}
 
-  let promptTokensTotal = out.promptTokens;
-  let completionTokensTotal = out.completionTokens;
-
+async function loadRagClassifierContext(doc: ChatJobDocument) {
   const faqConst = await FaqConstantModel.findOne({
     userId: doc.userId,
     apiKeyId: doc.apiKeyId,
@@ -404,8 +385,31 @@ async function runRagTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
   const allowedCategories = Array.isArray(faqConst?.categories)
     ? faqConst.categories.filter((c): c is string => typeof c === "string" && c.trim().length > 0)
     : [];
-  const allowedAnswerable = [...FAQ_ANSWERABLE_VALUES];
-  const allowedIntent = [...FAQ_INTENT_VALUES];
+  return {
+    allowedCategories,
+    allowedAnswerable: [...FAQ_ANSWERABLE_VALUES],
+    allowedIntent: [...FAQ_INTENT_VALUES],
+  };
+}
+
+async function finalizeRagJob(params: {
+  jobObjectId: mongoose.Types.ObjectId;
+  doc: ChatJobDocument;
+  out: CompletionOut;
+  ragQuestion: string;
+  ragRetrievalHits: FaqChunkHit[];
+  resolvedModelId: string;
+  baseUrl: string;
+  temperature: number;
+  logPrefix: string;
+}): Promise<void> {
+  const { jobObjectId, doc, out, ragQuestion, ragRetrievalHits, resolvedModelId, baseUrl, temperature, logPrefix } =
+    params;
+
+  let promptTokensTotal = out.promptTokens;
+  let completionTokensTotal = out.completionTokens;
+
+  const { allowedCategories, allowedAnswerable, allowedIntent } = await loadRagClassifierContext(doc);
 
   let classified: Awaited<ReturnType<typeof classifyRagJobAnalysis>> = null;
   try {
@@ -467,6 +471,49 @@ async function runRagTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
     console.log("[RAG dev] second persist (ragAnalysis/tokens) failed; answer already saved:", e);
   }
   void notifyChatJobUpdated(String(jobObjectId));
+}
+
+async function runRagTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
+  const { doc, jobObjectId } = ctx;
+  const logPrefix = "[runRagTaskJob]";
+
+  const messages = mapJobInputToMessages(doc);
+  const { baseUrl, temperature } = readOllamaEnv();
+  const ragQuestion = findLastUserMessage(messages);
+  let ragRetrievalHits: FaqChunkHit[] = [];
+
+  if (ragQuestion) {
+    try {
+      const hits = await retrieveRagHits(String(doc.apiKeyId), ragQuestion, baseUrl);
+      if (hits.length > 0) {
+        ragRetrievalHits = hits;
+        injectRagContext(messages, hits);
+      }
+    } catch (e) {
+      console.log("[RAG dev] retrieval error:", e);
+    }
+  }
+
+  const guardedMessages = withGuardrails(messages);
+  const resolvedModelId = resolveAllowedChatModelId(doc);
+  const out = await runRoutedMainCompletion(ctx, guardedMessages, logPrefix);
+
+  console.log("[RAG dev] generatedAnswer:\n" + (out.text ?? ""));
+
+  const persisted = await persistRagPartial(jobObjectId, out, logPrefix);
+  if (!persisted) return;
+
+  await finalizeRagJob({
+    jobObjectId,
+    doc,
+    out,
+    ragQuestion,
+    ragRetrievalHits,
+    resolvedModelId,
+    baseUrl,
+    temperature,
+    logPrefix,
+  });
 }
 
 async function runTranslateTaskJob(ctx: ChatJobRunnerContext): Promise<void> {

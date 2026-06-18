@@ -13,6 +13,8 @@ export const CHAT_JOB_STATUS_VALUES = [
   "cancelled",
 ] as const;
 
+export const CHAT_JOB_IN_FLIGHT_STATUSES = ["pending", "queued", "running"] as const;
+
 
 const chatMessageSchema = new mongoose.Schema(
   {
@@ -47,9 +49,9 @@ const chatJobErrorSchema = new mongoose.Schema(
 
 const chatJobRagAnalysisSchema = new mongoose.Schema(
   {
-    category: { type: String, default: null },
-    answerable: { type: String, enum: FAQ_ANSWERABLE_VALUES, default: null },
-    intent: { type: String, enum: FAQ_INTENT_VALUES, default: null },
+    category: { type: String, default: null, trim: true, maxlength: 120 },
+    answerable: { type: String, enum: FAQ_ANSWERABLE_VALUES, required: true },
+    intent: { type: String, enum: FAQ_INTENT_VALUES, required: true },
   },
   { _id: false },
 );

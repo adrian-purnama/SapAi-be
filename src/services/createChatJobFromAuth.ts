@@ -8,7 +8,7 @@ import type { NormalizedChatJobCreateBody } from "../schemas/chatJobBody.js";
 import type { ApiKeyAuthContext } from "../types/authContext.js";
 import { getPlanBySlugFromRegistry, resolvePlanForUser } from "../services/planRegistry.js";
 import { UserModel } from "../models/User.js";
-import { assertChatInputWithinPlanLimits } from "../utils/planChatLimits.js";
+import { assertChatInputWithinPlanLimits, assertChatInFlightWithinPlanLimits } from "../utils/planChatLimits.js";
 
 export type CreatedChatJobPayload = {
   jobId: string;
@@ -27,6 +27,7 @@ export async function createAndQueueChatJob(
   log?: { error: (obj: Record<string, unknown>, msg: string) => void },
 ): Promise<CreatedChatJobPayload> {
   await assertChatInputWithinPlanLimits(auth.userId, body.input);
+  await assertChatInFlightWithinPlanLimits(auth.userId);
 
   let planSnap = getPlanBySlugFromRegistry(auth.plan);
   if (!planSnap) {

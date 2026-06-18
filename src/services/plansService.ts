@@ -61,6 +61,7 @@ export async function createPlan(input: PlanCreateBody): Promise<PlanSnapshot> {
     isPriority: input.isPriority ?? false,
     rateLimitPerMinute: input.rateLimitPerMinute,
     maxCharacterPerMessage: input.maxCharacterPerMessage,
+    maxChatInFlight: input.maxChatInFlight,
     maxApiKeys: input.maxApiKeys,
     maxPdfUpload: input.maxPdfUpload,
     maxPdfMb: input.maxPdfMb,
@@ -93,6 +94,7 @@ export async function updatePlan(id: string, input: PlanPatchBody): Promise<Plan
   if (input.maxCharacterPerMessage !== undefined) {
     doc.maxCharacterPerMessage = input.maxCharacterPerMessage;
   }
+  if (input.maxChatInFlight !== undefined) doc.maxChatInFlight = input.maxChatInFlight;
   if (input.maxApiKeys !== undefined) doc.maxApiKeys = input.maxApiKeys;
   if (input.maxPdfUpload !== undefined) doc.maxPdfUpload = input.maxPdfUpload;
   if (input.maxPdfMb !== undefined) doc.maxPdfMb = input.maxPdfMb;
