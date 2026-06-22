@@ -1,5 +1,6 @@
 import mongoose, { type Types } from "mongoose";
 
+import { DEFAULT_TASK_ACCESS } from "../constants/taskCatalog.js";
 import { PlanModel, type PlanLean } from "../models/Plan.js";
 
 export type PlanSnapshot = {
@@ -23,6 +24,7 @@ export type PlanSnapshot = {
   ragAnalyticsEnabled: boolean;
   priceLabel: string | null;
   priceNote: string | null;
+  taskAccess: Record<string, string[]>;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -38,6 +40,20 @@ function toIso(d: unknown): string | null {
   if (!d) return null;
   const t = d instanceof Date ? d : new Date(String(d));
   return Number.isNaN(t.getTime()) ? null : t.toISOString();
+}
+
+function normalizeTaskAccessFromDoc(doc: PlanDoc): Record<string, string[]> {
+  const raw = (doc as { taskAccess?: unknown }).taskAccess;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ...DEFAULT_TASK_ACCESS };
+  }
+  const out: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue;
+    const labels = value.map((v) => String(v).trim()).filter(Boolean);
+    if (labels.length > 0) out[key] = labels;
+  }
+  return Object.keys(out).length > 0 ? out : { ...DEFAULT_TASK_ACCESS };
 }
 
 export function planDocToSnapshot(doc: PlanDoc): PlanSnapshot {
@@ -64,6 +80,7 @@ export function planDocToSnapshot(doc: PlanDoc): PlanSnapshot {
     ragAnalyticsEnabled: Boolean(doc.ragAnalyticsEnabled),
     priceLabel: doc.priceLabel != null ? String(doc.priceLabel) : null,
     priceNote: doc.priceNote != null ? String(doc.priceNote) : null,
+    taskAccess: normalizeTaskAccessFromDoc(doc),
     createdAt: toIso(doc.createdAt),
     updatedAt: toIso(doc.updatedAt),
   };
@@ -126,3 +143,41 @@ export function resolvePlanForUser(planRef: unknown): PlanSnapshot | undefined {
 
   return getDefaultPlanFromRegistry();
 }
+
+export type UserPlanContext = {
+  plan?: unknown;
+  planExpiresAt?: Date | string | null;
+};
+
+export function isUserPlanExpired(ctx: UserPlanContext, now = Date.now()): boolean {
+  if (!ctx.planExpiresAt) return false;
+  const t = ctx.planExpiresAt instanceof Date ? ctx.planExpiresAt.getTime() : new Date(ctx.planExpiresAt).getTime();
+  return Number.isFinite(t) && t <= now;
+}
+
+/** Effective plan for limits: expired non-default assignments fall back to the default plan. */
+export function resolveEffectivePlanForUser(ctx: UserPlanContext): PlanSnapshot | undefined {
+  const assigned = resolvePlanForUser(ctx.plan);
+  const defaultPlan = getDefaultPlanFromRegistry();
+  if (assigned?.isDefault) return assigned;
+  if (isUserPlanExpired(ctx)) return defaultPlan;
+  return assigned ?? defaultPlan;
+}
+
+// ponytail: assert self-check
+function _planExpirySelfCheck(): void {
+  const past = new Date("2020-01-01T00:00:00.000Z");
+  const future = new Date("2099-01-01T00:00:00.000Z");
+  const pro = ordered.find((p) => !p.isDefault);
+  const def = getDefaultPlanFromRegistry();
+  if (!pro || !def) return;
+  const expiredCtx: UserPlanContext = { plan: pro.id, planExpiresAt: past };
+  const activeCtx: UserPlanContext = { plan: pro.id, planExpiresAt: future };
+  const defaultCtx: UserPlanContext = { plan: def.id, planExpiresAt: past };
+  console.assert(isUserPlanExpired(expiredCtx), "past expiry should be expired");
+  console.assert(!isUserPlanExpired(activeCtx), "future expiry should be active");
+  console.assert(resolveEffectivePlanForUser(expiredCtx)?.slug === def.slug, "expired → default");
+  console.assert(resolveEffectivePlanForUser(activeCtx)?.slug === pro.slug, "active → assigned");
+  console.assert(resolveEffectivePlanForUser(defaultCtx)?.slug === def.slug, "default ignores expiry");
+}
+if (process.argv[1]?.includes("planRegistry")) _planExpirySelfCheck();

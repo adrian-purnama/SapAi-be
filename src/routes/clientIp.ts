@@ -1,12 +1,8 @@
 import type { FastifyInstance } from "fastify";
+
 import { requireBearerUser } from "../auth/requireBearerUser.js";
 import { sendSuccess } from "../utils/apiResponse.js";
-
-function firstHeaderValue(v: unknown): string | null {
-  if (typeof v === "string") return v;
-  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
-  return null;
-}
+import { firstHeaderValue } from "../utils/requestHeaders.js";
 
 function parseForwardedFor(raw: string | null): string | null {
   if (!raw) return null;
@@ -25,4 +21,3 @@ export async function registerClientIpRoutes(fastify: FastifyInstance): Promise<
     return sendSuccess(reply, { ip });
   });
 }
-

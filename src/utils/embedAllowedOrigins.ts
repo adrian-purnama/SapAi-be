@@ -12,7 +12,7 @@ function allowedOriginProtocol(url: URL): boolean {
 }
 
 /**
- * Validates and normalizes parent origins for CSP `frame-ancestors` (no path/query — origin only).
+ * Validates and normalizes parent origins for CSP `frame-ancestors` (no path/query   origin only).
  * @throws Error with user-facing message on invalid input
  */
 export function assertAndNormalizeEmbedAllowedOrigins(raw: string[]): string[] {

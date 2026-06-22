@@ -11,7 +11,7 @@ let scheduling = false;
 /**
  * Ensures a drain pass is running: claims and runs jobs until the queue is empty, then stops.
  * Safe to call on every new job (e.g. after `POST /api/v1/chat`): if a drain is already in
- * progress (`scheduling`), this is a no-op. No idle polling — only wakes from `startChatJobRunner`
+ * progress (`scheduling`), this is a no-op. No idle polling   only wakes from `startChatJobRunner`
  * or server startup (`index.ts`). Call `stopChatJobRunner` on shutdown.
  */
 export function startChatJobRunner(): void {

@@ -1,6 +1,4 @@
-import { QdrantClient } from "@qdrant/js-client-rest";
-
-import { getFaqChunksCollectionName } from "../services/qdrantFaqChunksService.js";
+import { getQdrantContext } from "./client.js";
 
 export type SearchFaqChunksParams = {
   apiKeyId: string;
@@ -15,24 +13,8 @@ export type FaqChunkHit = {
   faqDocumentId?: string;
 };
 
-function readQdrantEnv() {
-  const url = process.env.QDRANT_URL?.trim() ?? "";
-  const apiKey = process.env.QDRANT_API_KEY?.trim() ?? "";
-  const collection = getFaqChunksCollectionName();
-  return { url, apiKey, collection };
-}
-
-function getClientOrNull(): { client: QdrantClient; collection: string } | null {
-  const { url, apiKey, collection } = readQdrantEnv();
-  if (!url) return null;
-  return {
-    client: new QdrantClient({ url, apiKey: apiKey || undefined }),
-    collection,
-  };
-}
-
 export async function searchFaqChunks(params: SearchFaqChunksParams): Promise<FaqChunkHit[]> {
-  const ctx = getClientOrNull();
+  const ctx = getQdrantContext();
   if (!ctx) return [];
 
   const limit = Math.min(Math.max(params.limit ?? 5, 1), 20);
@@ -63,4 +45,3 @@ export async function searchFaqChunks(params: SearchFaqChunksParams): Promise<Fa
     })
     .filter((h) => h.text.trim().length > 0);
 }
-

@@ -5,7 +5,6 @@ import mongoose from "mongoose";
 import { authenticatePlainEmbedToken, requireApiKeyOrEmbedToken } from "../auth/embedTokenAuth.js";
 import { authenticatePlainApiKey, headerString, requireApiKey } from "../auth/requireApiKey.js";
 import { consumeWsStreamTicket, issueWsStreamTicket } from "../auth/wsStreamTicket.js";
-import { ALLOWED_CHAT_MODEL_IDS } from "../constants/chatModels.js";
 import { ChatJobModel, CHAT_JOB_STATUS_VALUES } from "../models/ChatJob.js";
 import {
   CHAT_TASK_TYPES,
@@ -13,7 +12,13 @@ import {
   normalizeChatJobCreateBody,
 } from "../schemas/chatJobBody.js";
 import { createAndQueueChatJob } from "../services/createChatJobFromAuth.js";
-import { PlanLimitError } from "../utils/planChatLimits.js";
+import {
+  getDefaultPlanFromRegistry,
+  getPlanBySlugFromRegistry,
+} from "../services/planRegistry.js";
+import { sendError, sendSuccess } from "../utils/apiResponse.js";
+import { getPlanTaskAccessView } from "../utils/planAccess.js";
+import { PlanLimitError, planLimitHttpStatus } from "../utils/planChatLimits.js";
 import { buildStructuredOutputSystemPrompt } from "../utils/buildStructuredOutputSystemPrompt.js";
 import { toPublicChatJob } from "../utils/toPublicChatJob.js";
 import {
@@ -27,23 +32,28 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
   fastify.addHook("onClose", async () => {
     shutdownChatJobStatusWsHub();
   });
-  fastify.get("/api/v1/chat/models", { preHandler: requireApiKey }, async () =>
-    ALLOWED_CHAT_MODEL_IDS.map((m) => m.label),
+  fastify.get("/api/v1/chat/models", { preHandler: requireApiKey }, async (request, reply) => {
+    const auth = request.apiAuth!;
+    const plan = getPlanBySlugFromRegistry(auth.plan) ?? getDefaultPlanFromRegistry();
+    const access = plan ? getPlanTaskAccessView(plan) : { taskTypes: [], modelsByTask: {} };
+    return sendSuccess(reply, access);
+  });
+
+  fastify.get("/api/v1/chat/task-types", { preHandler: requireApiKey }, async (request, reply) => {
+    const auth = request.apiAuth!;
+    const plan = getPlanBySlugFromRegistry(auth.plan) ?? getDefaultPlanFromRegistry();
+    const taskTypes = plan ? getPlanTaskAccessView(plan).taskTypes : [...CHAT_TASK_TYPES];
+    return sendSuccess(reply, taskTypes);
+  });
+
+  fastify.get("/api/v1/chat/statuses", { preHandler: requireApiKey }, async (_request, reply) =>
+    sendSuccess(reply, [...CHAT_JOB_STATUS_VALUES]),
   );
-
-  fastify.get("/api/v1/chat/task-types", { preHandler: requireApiKey }, async () => [
-    ...CHAT_TASK_TYPES,
-  ]);
-
-  fastify.get("/api/v1/chat/statuses", { preHandler: requireApiKey }, async () => [
-    ...CHAT_JOB_STATUS_VALUES,
-  ]);
 
   fastify.post("/api/v1/chat", { preHandler: requireApiKey }, async (request, reply) => {
     const parsed = chatJobCreateBodySchema.safeParse(request.body ?? {});
     if (!parsed.success) {
-      return reply.code(400).send({
-        message: "Invalid body",
+      return sendError(reply, "Invalid body", 400, "VALIDATION_ERROR", {
         issues: parsed.error.flatten(),
       });
     }
@@ -72,7 +82,7 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
       merged = { ...body, input: jobInput };
     } catch (err) {
       if (err instanceof PlanLimitError) {
-        return reply.code(400).send({ message: err.message, code: err.code });
+        return sendError(reply, err.message, planLimitHttpStatus(err.code), err.code);
       }
       throw err;
     }
@@ -84,13 +94,12 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
       });
     } catch (err) {
       if (err instanceof PlanLimitError) {
-        return reply.code(400).send({ message: err.message, code: err.code });
+        return sendError(reply, err.message, planLimitHttpStatus(err.code), err.code);
       }
       throw err;
     }
 
-    return {
-      ok: true,
+    return sendSuccess(reply, {
       job: {
         id: created.jobId,
         status: created.status,
@@ -98,14 +107,14 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
         model: created.model,
         createdAt: created.createdAt,
       },
-    };
+    });
   });
 
   fastify.get("/api/v1/chat/jobs/:id", { preHandler: requireApiKeyOrEmbedToken }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const auth = request.apiAuth!;
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return reply.code(404).send({ message: "Job not found" });
+      return sendError(reply, "Job not found.", 404, "NOT_FOUND");
     }
     const job = await ChatJobModel.findOne({
       _id: new mongoose.Types.ObjectId(id),
@@ -115,9 +124,9 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
       .lean()
       .exec();
     if (!job) {
-      return reply.code(404).send({ message: "Job not found" });
+      return sendError(reply, "Job not found.", 404, "NOT_FOUND");
     }
-    return toPublicChatJob(job);
+    return sendSuccess(reply, toPublicChatJob(job));
   });
 
   fastify.post(
@@ -127,7 +136,7 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
       const { id } = request.params as { id: string };
       const auth = request.apiAuth!;
       if (!mongoose.Types.ObjectId.isValid(id)) {
-        return reply.code(404).send({ message: "Job not found" });
+        return sendError(reply, "Job not found.", 404, "NOT_FOUND");
       }
       const job = await ChatJobModel.findOne({
         _id: new mongoose.Types.ObjectId(id),
@@ -136,7 +145,7 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
         .select("_id")
         .lean();
       if (!job) {
-        return reply.code(404).send({ message: "Job not found" });
+        return sendError(reply, "Job not found.", 404, "NOT_FOUND");
       }
       const embedHdr = headerString(request.headers["x-embed-token"]);
       const apiKeyHdr = headerString(request.headers["x-api-key"]);
@@ -145,7 +154,7 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
         embedToken: embedHdr,
         apiKey: apiKeyHdr,
       });
-      return { ok: true, ticket: issued.ticket, expiresInSec: issued.expiresInSec };
+      return sendSuccess(reply, { ticket: issued.ticket, expiresInSec: issued.expiresInSec });
     },
   );
 

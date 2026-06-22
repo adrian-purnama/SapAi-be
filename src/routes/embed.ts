@@ -2,9 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import { requireEmbedToken } from "../auth/embedTokenAuth.js";
-import { ALLOWED_CHAT_MODEL_IDS } from "../constants/chatModels.js";
+import { modelLabelsForTask } from "../constants/taskCatalog.js";
 import { createAndQueueChatJob } from "../services/createChatJobFromAuth.js";
-import { PlanLimitError } from "../utils/planChatLimits.js";
+import { PlanLimitError, planLimitHttpStatus } from "../utils/planChatLimits.js";
 import {
   getEmbedFrameAncestorsForRawToken,
   getPublicEmbedBrandingForActiveToken,
@@ -21,9 +21,10 @@ import {
   RECAPTCHA_EMBED_CHAT_ACTION,
   verifyRecaptchaToken,
 } from "../utils/recaptcha.js";
+import { sendError, sendSuccess } from "../utils/apiResponse.js";
 
-const MODEL_LABELS = ALLOWED_CHAT_MODEL_IDS.map((m) => m.label) as unknown as [string, ...string[]];
-const modelEnum = z.enum(MODEL_LABELS);
+const RAG_MODEL_LABELS = modelLabelsForTask("rag") as [string, ...string[]];
+const modelEnum = z.enum(RAG_MODEL_LABELS);
 
 const embedChatBodySchema = z.object({
   message: z.string().trim().min(1, "Message cannot be empty"),
@@ -43,7 +44,7 @@ function readEmbedTokenFromRequest(request: FastifyRequest): string {
 function requireEmbedTokenOrReply(request: FastifyRequest, reply: FastifyReply): string | null {
   const token = readEmbedTokenFromRequest(request);
   if (!token) {
-    void reply.code(400).send({ message: "Missing embed token.", code: "EMBED_TOKEN_REQUIRED" });
+    void sendError(reply, "Missing embed token.", 400, "EMBED_TOKEN_REQUIRED");
     return null;
   }
   return token;
@@ -73,15 +74,14 @@ async function handleEmbedStatus(request: FastifyRequest, reply: FastifyReply) {
 
   const active = await isEmbedTokenActive(token);
   if (!active) {
-    return reply.code(404).send({ message: "Embed not found or disabled.", code: "EMBED_INACTIVE" });
+    return sendError(reply, "Embed not found or disabled.", 404, "EMBED_INACTIVE");
   }
 
   await recordVisitIfScoped(token, request, "status");
 
   const resolveFileUrl = (p: string | null) => toAbsoluteUrlFromRequest(request, p);
   const branding = await getPublicEmbedBrandingForActiveToken(token, resolveFileUrl);
-  return reply.send({
-    ok: true,
+  return sendSuccess(reply, {
     active: true,
     assistantName: branding?.assistantName ?? null,
     assistantDescription: branding?.assistantDescription ?? null,
@@ -100,16 +100,15 @@ async function handleEmbedFramePolicy(request: FastifyRequest, reply: FastifyRep
 
   const frameAncestors = await getEmbedFrameAncestorsForRawToken(token);
   if (!frameAncestors) {
-    return reply.code(404).send({ message: "Embed not found or disabled.", code: "EMBED_INACTIVE" });
+    return sendError(reply, "Embed not found or disabled.", 404, "EMBED_INACTIVE");
   }
-  return reply.send({ frameAncestors });
+  return sendSuccess(reply, { frameAncestors });
 }
 
 async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
   const parsed = embedChatBodySchema.safeParse(request.body ?? {});
   if (!parsed.success) {
-    return reply.code(400).send({
-      message: "Invalid body",
+    return sendError(reply, "Invalid body", 400, "VALIDATION_ERROR", {
       issues: parsed.error.flatten(),
     });
   }
@@ -121,17 +120,14 @@ async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
       expectedAction: RECAPTCHA_EMBED_CHAT_ACTION,
     });
     if (!recaptcha.ok) {
-      return reply.code(400).send({
-        message: recaptcha.message,
-        code: recaptcha.code,
-      });
+      return sendError(reply, recaptcha.message, 400, recaptcha.code);
     }
   }
 
   const auth = request.apiAuth!;
 
-  //TODO:model here is predefined ?
-  const model = parsed.data.model ?? "OCT3Q";
+  // ponytail: default rag model is first catalog label for this task
+  const model = parsed.data.model ?? RAG_MODEL_LABELS[0];
   const body = {
     taskType: "rag" as const,
     model,
@@ -146,7 +142,7 @@ async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
     });
   } catch (err) {
     if (err instanceof PlanLimitError) {
-      return reply.code(400).send({ message: err.message, code: err.code });
+      return sendError(reply, err.message, planLimitHttpStatus(err.code), err.code);
     }
     throw err;
   }
@@ -161,8 +157,7 @@ async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
     request.log,
   );
 
-  return {
-    ok: true,
+  return sendSuccess(reply, {
     job: {
       id: created.jobId,
       status: created.status,
@@ -170,7 +165,7 @@ async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
       model: created.model,
       createdAt: created.createdAt,
     },
-  };
+  });
 }
 
 export async function registerEmbedRoutes(fastify: FastifyInstance): Promise<void> {

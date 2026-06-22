@@ -1,6 +1,7 @@
 import type { ClientSession } from "mongodb";
 import mongoose from "mongoose";
 import { PublicFileModel } from "../models/PublicFile.js";
+import { getGridFsBucket, toObjectId, uploadBufferToGridFs } from "../utils/gridfs.js";
 
 export const PUBLIC_FILES_BUCKET = "publicFiles";
 
@@ -14,40 +15,12 @@ export type UploadPublicFileResult = {
   urlPath: string;
 };
 
-function getDb() {
-  const db = mongoose.connection.db;
-  if (!db) throw new Error("MongoDB connection is not ready.");
-  return db;
-}
-
-function toObjectId(id: string): mongoose.Types.ObjectId {
-  if (!mongoose.Types.ObjectId.isValid(id)) throw new Error("Invalid file id.");
-  return new mongoose.Types.ObjectId(id);
-}
-
 function publicFileUrlPath(fileId: string): string {
   return `/api/v1/files/${fileId}`;
 }
 
 export function getPublicFilesBucket() {
-  return new mongoose.mongo.GridFSBucket(getDb(), { bucketName: PUBLIC_FILES_BUCKET });
-}
-
-function uploadBufferToGridFs(
-  bucket: mongoose.mongo.GridFSBucket,
-  buffer: Buffer,
-  options: UploadPublicFileOptions,
-  session?: ClientSession,
-): Promise<mongoose.Types.ObjectId> {
-  return new Promise((resolve, reject) => {
-    const uploadStream = bucket.openUploadStream(options.originalFilename, {
-      ...(session ? { session } : {}),
-      metadata: { contentType: options.contentType },
-    });
-    uploadStream.once("finish", () => resolve(uploadStream.id as mongoose.Types.ObjectId));
-    uploadStream.once("error", reject);
-    uploadStream.end(buffer);
-  });
+  return getGridFsBucket(PUBLIC_FILES_BUCKET);
 }
 
 export async function uploadPublicFile(
@@ -56,7 +29,13 @@ export async function uploadPublicFile(
   session?: ClientSession,
 ): Promise<UploadPublicFileResult> {
   const bucket = getPublicFilesBucket();
-  const gridFsFileId = await uploadBufferToGridFs(bucket, buffer, options, session);
+  const gridFsFileId = await uploadBufferToGridFs(
+    bucket,
+    buffer,
+    options.originalFilename,
+    options.contentType,
+    session,
+  );
 
   await PublicFileModel.create(
     [
@@ -75,7 +54,7 @@ export async function uploadPublicFile(
 }
 
 export async function deletePublicFile(fileId: string, session?: ClientSession): Promise<void> {
-  const _id = toObjectId(fileId);
+  const _id = toObjectId(fileId, "Invalid file id.");
   const bucket = getPublicFilesBucket();
 
   if (session) {
@@ -116,7 +95,7 @@ export type PublicFileDownload = {
 };
 
 export async function getPublicFileForDownload(fileId: string): Promise<PublicFileDownload | null> {
-  const _id = toObjectId(fileId);
+  const _id = toObjectId(fileId, "Invalid file id.");
   const bucket = getPublicFilesBucket();
   const meta = await PublicFileModel.findOne({ gridFsFileId: _id }).lean();
   if (!meta) return null;

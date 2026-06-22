@@ -3,6 +3,8 @@
  * @see https://github.com/ollama/ollama/blob/main/docs/api.md
  */
 
+import { resolveEmbedBackendModel, MODELS } from "../constants/taskCatalog.js";
+
 export type CallOllamaEmbedParams = {
   baseUrl: string;
   model: string;
@@ -23,10 +25,6 @@ function joinOllamaEmbedUrl(baseUrl: string): string {
 
 let cachedResolvedEmbedModel: string | null = null;
 
-export function clearOllamaEmbedModelCache(): void {
-  cachedResolvedEmbedModel = null;
-}
-
 export async function listOllamaModelNames(baseUrl: string): Promise<string[]> {
   const root = baseUrl.replace(/\/$/, "");
   try {
@@ -41,16 +39,14 @@ export async function listOllamaModelNames(baseUrl: string): Promise<string[]> {
   }
 }
 
-/**
- * Maps `OLLAMA_EMBED_MODEL` to a name Ollama actually has (e.g. `qwen3-embedding` → `qwen3-embedding:4b`).
- */
+/** Maps catalog embed model to a name Ollama actually has (e.g. `qwen3-embedding` → `qwen3-embedding:4b`). */
 export async function resolveOllamaEmbedModel(
   baseUrl: string,
-  preferred = readOllamaEmbedModel(),
+  preferred = resolveEmbedBackendModel(),
 ): Promise<string> {
   if (cachedResolvedEmbedModel) return cachedResolvedEmbedModel;
 
-  const want = preferred.trim() || readOllamaEmbedModel();
+  const want = preferred.trim() || resolveEmbedBackendModel();
   const names = await listOllamaModelNames(baseUrl);
 
   if (names.length === 0) {
@@ -121,8 +117,8 @@ export async function callOllamaEmbed(params: CallOllamaEmbedParams): Promise<Ol
       const available = await listOllamaModelNames(params.baseUrl);
       const hint =
         available.length > 0
-          ? ` Available models: ${available.join(", ")}. Set OLLAMA_EMBED_MODEL to an exact name from \`ollama list\`.`
-          : " Check `ollama list` and set OLLAMA_EMBED_MODEL to the exact tag (e.g. qwen3-embedding:4b).";
+          ? ` Available models: ${available.join(", ")}. Update MODELS.EMBED.id in taskCatalog.ts to match \`ollama list\`.`
+          : ` Check \`ollama list\` and set MODELS.EMBED.id in taskCatalog.ts (currently ${MODELS.EMBED.id}).`;
       throw new Error(`Ollama embed failed (${res.status}): ${msg}${hint}`);
     }
     throw new Error(`Ollama embed failed (${res.status}): ${msg}`);
@@ -134,10 +130,6 @@ export async function callOllamaEmbed(params: CallOllamaEmbedParams): Promise<Ol
   }
 
   return o as OllamaEmbedResponse;
-}
-
-export function readOllamaEmbedModel(): string {
-  return process.env.OLLAMA_EMBED_MODEL?.trim() || "nomic-embed-text-v2-moe";
 }
 
 /**

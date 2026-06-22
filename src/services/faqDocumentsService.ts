@@ -7,6 +7,8 @@ import type { FaqProcessingError, FaqProcessingStatus } from "../constants/faqDo
 import { FaqChunkModel } from "../models/FaqChunk.js";
 import { FaqDocumentModel } from "../models/FaqDocument.js";
 import { deleteFaqDocumentPointsFromQdrant } from "./qdrantFaqChunksService.js";
+import { extFromFilename } from "../utils/filename.js";
+import { getGridFsBucket, toObjectId, uploadBufferToGridFs } from "../utils/gridfs.js";
 
 export const MAX_FAQ_DOCUMENT_BYTES = 15 * 1024 * 1024;
 export const FAQ_DOCUMENTS_BUCKET = "faqDocuments";
@@ -26,12 +28,6 @@ export class FaqUploadValidationError extends Error {
   }
 }
 
-function extFromFilename(filename: string): string {
-  const i = filename.lastIndexOf(".");
-  if (i < 0) return "";
-  return filename.slice(i).toLowerCase();
-}
-
 export function assertAllowedFaqUpload(contentType: string, filename: string): void {
   const ext = extFromFilename(filename || "");
   if (ext !== FAQ_ALLOWED_EXTENSION) {
@@ -47,39 +43,8 @@ export function assertAllowedFaqUpload(contentType: string, filename: string): v
   }
 }
 
-function getDb() {
-  const db = mongoose.connection.db;
-  if (!db) throw new Error("MongoDB connection is not ready.");
-  return db;
-}
-
-function toObjectId(id: string): mongoose.Types.ObjectId {
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    throw new Error("Invalid document id.");
-  }
-  return new mongoose.Types.ObjectId(id);
-}
-
 export function getFaqDocumentsBucket() {
-  return new mongoose.mongo.GridFSBucket(getDb(), { bucketName: FAQ_DOCUMENTS_BUCKET });
-}
-
-function uploadBufferToGridFs(
-  bucket: mongoose.mongo.GridFSBucket,
-  buffer: Buffer,
-  originalFilename: string,
-  contentType: string,
-  session?: ClientSession,
-): Promise<mongoose.Types.ObjectId> {
-  return new Promise((resolve, reject) => {
-    const uploadStream = bucket.openUploadStream(originalFilename, {
-      ...(session ? { session } : {}),
-      metadata: { contentType },
-    });
-    uploadStream.once("finish", () => resolve(uploadStream.id as mongoose.Types.ObjectId));
-    uploadStream.once("error", reject);
-    uploadStream.end(buffer);
-  });
+  return getGridFsBucket(FAQ_DOCUMENTS_BUCKET);
 }
 
 export type UploadFaqDocumentParams = {
@@ -167,7 +132,7 @@ export async function deleteFaqDocument(
   userId: mongoose.Types.ObjectId,
   session?: ClientSession,
 ): Promise<boolean> {
-  const _id = toObjectId(documentId);
+  const _id = toObjectId(documentId, "Invalid document id.");
 
   const query = FaqDocumentModel.findOne({ _id, userId });
   const meta = session ? await query.session(session).lean() : await query.lean();
@@ -212,7 +177,7 @@ export async function updateFaqDocument(
   const session = await mongoose.startSession();
   try {
     return await session.withTransaction(async () => {
-      const existing = await FaqDocumentModel.findOne({ _id: toObjectId(documentId), userId }).session(session);
+      const existing = await FaqDocumentModel.findOne({ _id: toObjectId(documentId, "Invalid document id."), userId }).session(session);
       if (!existing) throw new Error("Document not found.");
 
       const oldGfsId = existing.gridFsFileId as mongoose.Types.ObjectId;
@@ -256,7 +221,7 @@ export async function getFaqDocumentForDownload(
   documentId: string,
   userId: mongoose.Types.ObjectId,
 ): Promise<FaqDocumentDownload | null> {
-  const _id = toObjectId(documentId);
+  const _id = toObjectId(documentId, "Invalid document id.");
   const meta = await FaqDocumentModel.findOne({ _id, userId }).lean();
   if (!meta) return null;
 
@@ -293,7 +258,7 @@ export async function readFaqDocumentBuffer(
   const download = await getFaqDocumentForDownload(documentId, userId);
   if (!download) return null;
 
-  const meta = await FaqDocumentModel.findOne({ _id: toObjectId(documentId), userId })
+  const meta = await FaqDocumentModel.findOne({ _id: toObjectId(documentId, "Invalid document id."), userId })
     .select("apiKeyId contentType originalFilename")
     .lean();
   if (!meta?.apiKeyId) return null;
@@ -312,7 +277,7 @@ export async function listFaqDocumentsForApiKey(
   userId: mongoose.Types.ObjectId,
   limit = 50,
 ): Promise<FaqDocumentListItem[]> {
-  const keyOid = toObjectId(apiKeyId);
+  const keyOid = toObjectId(apiKeyId, "Invalid api key id.");
   const rows = await FaqDocumentModel.find({ userId, apiKeyId: keyOid })
     .sort({ createdAt: -1 })
     .limit(Math.min(Math.max(limit, 1), 100))

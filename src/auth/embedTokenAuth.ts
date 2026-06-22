@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 import type { FastifyReply, FastifyRequest } from "fastify";
 import mongoose from "mongoose";
 
@@ -10,12 +8,8 @@ import { ApiKeyModel } from "../models/ApiKey.js";
 import { findFaqConstantByEmbedToken } from "../utils/embedTokenLookup.js";
 import { UserModel } from "../models/User.js";
 import type { ApiKeyAuthContext } from "../types/authContext.js";
-import { resolvePlanForUser } from "../services/planRegistry.js";
-import { planAllowsPublicEmbed } from "../utils/planAccess.js";
-
-function sha256Hex(input: string): string {
-  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
-}
+import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
+import { sha256Hex } from "../utils/sha256.js";
 
 function allowlistAllowsAll(allowlist: string[]): boolean {
   return allowlist.includes("0.0.0.0");
@@ -79,7 +73,7 @@ export async function authenticatePlainEmbedToken(
     };
   }
 
-  const user = await UserModel.findById(apiKey.userId);
+  const user = await UserModel.findById(apiKey.userId).select("plan planExpiresAt email isAdmin isBlocked");
   if (!user) {
     return {
       ok: false,
@@ -94,7 +88,8 @@ export async function authenticatePlainEmbedToken(
   }
 
   const rateKey = `embed:${sha256Hex(token)}`;
-  const perMinute = getRateLimitPerMinuteForUserPlan(user.plan);
+  const planCtx = { plan: user.plan, planExpiresAt: user.planExpiresAt };
+  const perMinute = getRateLimitPerMinuteForUserPlan(planCtx);
   if (!(await tryConsumeApiKeyRateSlot(rateKey, perMinute))) {
     return {
       ok: false,
@@ -119,8 +114,8 @@ export async function authenticatePlainEmbedToken(
     }
   }
 
-  const resolved = resolvePlanForUser(user.plan);
-  if (!resolved || !planAllowsPublicEmbed(resolved)) {
+  const resolved = resolveEffectivePlanForUser(planCtx);
+  if (!resolved?.isAutoEmbed) {
     return {
       ok: false,
       failure: {

@@ -6,9 +6,13 @@ import { ChatJobModel } from "../models/ChatJob.js";
 import { MAX_CHAT_MAX_TOKENS } from "../constants/chatLimits.js";
 import type { NormalizedChatJobCreateBody } from "../schemas/chatJobBody.js";
 import type { ApiKeyAuthContext } from "../types/authContext.js";
-import { getPlanBySlugFromRegistry, resolvePlanForUser } from "../services/planRegistry.js";
-import { UserModel } from "../models/User.js";
-import { assertChatInputWithinPlanLimits, assertChatInFlightWithinPlanLimits } from "../utils/planChatLimits.js";
+import { getPlanBySlugFromRegistry } from "../services/planRegistry.js";
+import {
+  assertChatInputWithinPlanLimits,
+  assertChatInFlightWithinPlanLimits,
+  PlanLimitError,
+} from "../utils/planChatLimits.js";
+import { assertPlanAllowsTaskAndModel } from "../utils/planAccess.js";
 
 export type CreatedChatJobPayload = {
   jobId: string;
@@ -26,16 +30,20 @@ export async function createAndQueueChatJob(
   body: NormalizedChatJobCreateBody,
   log?: { error: (obj: Record<string, unknown>, msg: string) => void },
 ): Promise<CreatedChatJobPayload> {
+  
+  // security check
   await assertChatInputWithinPlanLimits(auth.userId, body.input);
   await assertChatInFlightWithinPlanLimits(auth.userId);
 
-  let planSnap = getPlanBySlugFromRegistry(auth.plan);
+  const planSnap = getPlanBySlugFromRegistry(auth.plan);
   if (!planSnap) {
-    const user = await UserModel.findById(auth.userId).select("plan").lean();
-    planSnap = resolvePlanForUser(user?.plan);
+    throw new PlanLimitError("No subscription plan found.", "PLAN_NOT_FOUND");
   }
-  const planSlug = planSnap?.slug ?? auth.plan;
+  assertPlanAllowsTaskAndModel(planSnap, body.taskType, body.model);
 
+  const planSlug = planSnap.slug;
+
+  //create job
   const doc = await ChatJobModel.create({
     userId: new mongoose.Types.ObjectId(auth.userId),
     plan: planSlug,
@@ -47,13 +55,15 @@ export async function createAndQueueChatJob(
     status: "pending",
   });
 
-  const runJobImmediately = Boolean(planSnap?.isPriority);
+  //run job immediately if priority plan
+  const runJobImmediately = Boolean(planSnap.isPriority);
   if (runJobImmediately) {
     const id = doc._id.toString();
     void runChatJobById(id).catch((err: unknown) => {
       log?.error({ err, jobId: id }, "runChatJobById rejected (priority inline)");
     });
   } else {
+    ///main start runner
     startChatJobRunner();
   }
 

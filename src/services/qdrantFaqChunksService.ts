@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { QdrantClient } from "@qdrant/js-client-rest";
+import type { QdrantClient } from "@qdrant/js-client-rest";
+
+import {
+  getFaqChunksCollectionName,
+  getQdrantClient,
+  safeQdrantOrigin,
+} from "../qdrant/client.js";
 
 const MAX_PAYLOAD_TEXT = 12_000;
 
@@ -16,24 +22,6 @@ export type UpsertFaqChunkVectorsOptions = {
   replaceDocumentId?: string;
 };
 
-function readEnv() {
-  const url = (process.env.QDRANT_URL ?? "").trim();
-  const apiKey = (process.env.QDRANT_API_KEY ?? "").trim();
-  return { url, apiKey };
-}
-
-function safeQdrantOrigin(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return "(invalid QDRANT_URL)";
-  }
-}
-
-export function getFaqChunksCollectionName(): string {
-  return process.env.QDRANT_FAQ_COLLECTION?.trim() || "faq_chunks";
-}
-
 export function faqChunkIdToQdrantPointId(chunkId: string): string {
   const hash = createHash("sha256").update(`faq_chunk:${chunkId}`).digest();
   const bytes = Buffer.alloc(16);
@@ -42,12 +30,6 @@ export function faqChunkIdToQdrantPointId(chunkId: string): string {
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
-
-function clientOrNull(): QdrantClient | null {
-  const { url, apiKey } = readEnv();
-  if (!url) return null;
-  return new QdrantClient({ url, apiKey: apiKey || undefined });
 }
 
 function qdrantErrorDetail(err: unknown): string {
@@ -177,10 +159,7 @@ export async function upsertFaqChunkVectors(
 ): Promise<{ upserted: number; skipped: boolean; error?: string }> {
   if (points.length === 0) return { upserted: 0, skipped: false };
 
-  const { url, apiKey } = readEnv();
-  if (!url) return { upserted: 0, skipped: true };
-
-  const client = clientOrNull();
+  const client = getQdrantClient();
   if (!client) return { upserted: 0, skipped: true };
 
   const collection = getFaqChunksCollectionName();
@@ -225,14 +204,14 @@ export async function upsertFaqChunkVectors(
       e instanceof QdrantVectorDimensionMismatchError
         ? e.message
         : /expected dim|vector dimension|dimension/i.test(detail)
-          ? `${detail}. This usually means the Qdrant collection was created for a different embedding model — delete collection "${collection}" or change QDRANT_FAQ_COLLECTION, then Rechunk.`
+          ? `${detail}. This usually means the Qdrant collection was created for a different embedding model   delete collection "${collection}" or change QDRANT_FAQ_COLLECTION, then Rechunk.`
           : detail || "Qdrant upsert failed.";
     console.error("[qdrantFaqChunksService] upsert error", {
       message,
       detail,
       vectorDim: dim,
-      origin: safeQdrantOrigin(url),
-      hasApiKey: Boolean(apiKey),
+      origin: safeQdrantOrigin(process.env.QDRANT_URL?.trim() ?? ""),
+      hasApiKey: Boolean(process.env.QDRANT_API_KEY?.trim()),
     });
     return { upserted: 0, skipped: false, error: message };
   }
@@ -244,10 +223,7 @@ export async function deleteFaqDocumentPointsFromQdrant(
   const docId = faqDocumentId.trim();
   if (!docId) return { ok: false, skipped: true };
 
-  const { url } = readEnv();
-  if (!url) return { ok: false, skipped: true };
-
-  const client = clientOrNull();
+  const client = getQdrantClient();
   if (!client) return { ok: false, skipped: true };
 
   const collection = getFaqChunksCollectionName();
@@ -282,10 +258,7 @@ export async function deleteFaqChunkPointsByApiKeyFromQdrant(
   const id = apiKeyId.trim();
   if (!id) return { ok: false, skipped: true };
 
-  const { url } = readEnv();
-  if (!url) return { ok: false, skipped: true };
-
-  const client = clientOrNull();
+  const client = getQdrantClient();
   if (!client) return { ok: false, skipped: true };
 
   const collection = getFaqChunksCollectionName();

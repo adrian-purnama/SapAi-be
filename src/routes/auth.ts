@@ -14,19 +14,26 @@ import { getDefaultPlanFromRegistry } from "../services/planRegistry.js";
 import { upsertOtpForEmail, verifyOtpForEmail } from "../services/otpService.js";
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
 import { isValidEmail } from "../utils/isValidEmail.js";
-import { rejectPasswordIfTooLong, validatePasswordForAuth } from "../utils/passwordInput.js";
+import { rejectPasswordIfTooLong, validatePasswordForAuth } from "../utils/passwordPolicy.js";
 import { resolvePlanPublicForUser } from "../utils/planAccess.js";
 import { clientErrorMessage } from "../utils/sanitizeError.js";
 
 const GENERIC_OTP_SENT = { message: "If this email is eligible, check your inbox for a code." };
 
-function serializeAuthUser(user: { _id: mongoose.Types.ObjectId; email: string; isAdmin?: boolean; isEmailVerified?: boolean; plan?: unknown }) {
+function serializeAuthUser(user: {
+  _id: mongoose.Types.ObjectId;
+  email: string;
+  isAdmin?: boolean;
+  isEmailVerified?: boolean;
+  plan?: unknown;
+  planExpiresAt?: Date | null;
+}) {
   return {
     id: user._id.toString(),
     email: user.email,
     isAdmin: Boolean(user.isAdmin),
     isEmailVerified: Boolean(user.isEmailVerified),
-    plan: resolvePlanPublicForUser(user.plan),
+    plan: resolvePlanPublicForUser({ plan: user.plan, planExpiresAt: user.planExpiresAt }),
   };
 }
 
@@ -74,8 +81,12 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
       const user = await UserModel.findOne({ email });
       if (!user) return sendError(reply, "Invalid credentials.", 401, "INVALID_CREDENTIALS");
 
-      const ok = await verifyPassword(password, user.passwordHash);
-      if (!ok) return sendError(reply, "Invalid credentials.", 401, "INVALID_CREDENTIALS");
+      const verified = await verifyPassword(password, user.passwordHash);
+      if (!verified.ok) return sendError(reply, "Invalid credentials.", 401, "INVALID_CREDENTIALS");
+      if (verified.needsUpgrade) {
+        user.passwordHash = await hashPassword(password);
+        await user.save();
+      }
       if (!user.isEmailVerified) return sendError(reply, "Email is not verified.", 403, "EMAIL_NOT_VERIFIED");
       if (user.isBlocked) return sendError(reply, "Account is blocked.", 403, "USER_BLOCKED");
 
@@ -321,8 +332,8 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
         const passwordError = validatePasswordForAuth(newPassword);
         if (passwordError) return sendError(reply, passwordError, 400, "WEAK_PASSWORD");
 
-        const ok = await verifyPassword(currentPassword, user.passwordHash);
-        if (!ok) return sendError(reply, "Invalid current password.", 401, "INVALID_CREDENTIALS");
+        const verified = await verifyPassword(currentPassword, user.passwordHash);
+        if (!verified.ok) return sendError(reply, "Invalid current password.", 401, "INVALID_CREDENTIALS");
 
         user.passwordHash = await hashPassword(newPassword);
         user.tokenVersion = (user.tokenVersion ?? 0) + 1;

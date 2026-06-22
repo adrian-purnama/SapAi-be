@@ -71,6 +71,7 @@ export async function createPlan(input: PlanCreateBody): Promise<PlanSnapshot> {
     ragAnalyticsEnabled: input.ragAnalyticsEnabled ?? false,
     priceLabel: normalizeOptionalPrice(input.priceLabel) ?? null,
     priceNote: normalizeOptionalPrice(input.priceNote) ?? null,
+    taskAccess: input.taskAccess,
   });
 
   await reloadPlanRegistry();
@@ -108,6 +109,7 @@ export async function updatePlan(id: string, input: PlanPatchBody): Promise<Plan
   if (input.ragAnalyticsEnabled !== undefined) doc.ragAnalyticsEnabled = input.ragAnalyticsEnabled;
   if (input.priceLabel !== undefined) doc.priceLabel = normalizeOptionalPrice(input.priceLabel);
   if (input.priceNote !== undefined) doc.priceNote = normalizeOptionalPrice(input.priceNote);
+  if (input.taskAccess !== undefined) doc.taskAccess = input.taskAccess;
 
   if (input.isDefault === true) {
     await clearOtherDefaults(id);

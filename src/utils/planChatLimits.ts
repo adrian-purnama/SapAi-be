@@ -3,7 +3,8 @@ import mongoose from "mongoose";
 import { UserModel } from "../models/User.js";
 import { ChatJobModel, CHAT_JOB_IN_FLIGHT_STATUSES } from "../models/ChatJob.js";
 import { getRateLimitPerMinuteForUserPlan } from "../auth/apiKeyRateLimit.js";
-import { resolvePlanForUser, type PlanSnapshot } from "../services/planRegistry.js";
+import { resolveEffectivePlanForUser, type PlanSnapshot } from "../services/planRegistry.js";
+import { planToPublicSnapshot } from "../utils/planAccess.js";
 
 export class PlanLimitError extends Error {
   readonly code: string;
@@ -13,6 +14,11 @@ export class PlanLimitError extends Error {
     this.name = "PlanLimitError";
     this.code = code;
   }
+}
+
+export function planLimitHttpStatus(code: string): number {
+  if (code === "TASK_NOT_ALLOWED" || code === "MODEL_NOT_ALLOWED") return 403;
+  return 400;
 }
 
 export type PlanUsageLimits = {
@@ -30,27 +36,29 @@ export type PlanUsageLimits = {
 };
 
 export async function getPlanUsageLimitsForUser(userId: string): Promise<PlanUsageLimits> {
-  const user = await UserModel.findById(userId).select("plan").lean();
-  const plan = resolvePlanForUser(user?.plan);
-  const rateLimitPerMinute = getRateLimitPerMinuteForUserPlan(user?.plan);
+  const user = await UserModel.findById(userId).select("plan planExpiresAt").lean();
+  const planCtx = { plan: user?.plan, planExpiresAt: user?.planExpiresAt };
+  const plan = resolveEffectivePlanForUser(planCtx);
+  const rateLimitPerMinute = getRateLimitPerMinuteForUserPlan(planCtx);
   const maxCharacterPerMessage = plan?.maxCharacterPerMessage ?? 2000;
   const maxChatInFlight = plan?.maxChatInFlight ?? 5;
 
   return {
-    plan: plan ? planToPublicLimits(plan) : null,
+    plan: plan ? planUsagePlanFromSnapshot(plan) : null,
     rateLimitPerMinute,
     maxCharacterPerMessage,
     maxChatInFlight,
   };
 }
 
-function planToPublicLimits(plan: PlanSnapshot): NonNullable<PlanUsageLimits["plan"]> {
+function planUsagePlanFromSnapshot(plan: PlanSnapshot): NonNullable<PlanUsageLimits["plan"]> {
+  const pub = planToPublicSnapshot(plan);
   return {
-    slug: plan.slug,
-    name: plan.name,
-    rateLimitPerMinute: plan.rateLimitPerMinute,
-    maxCharacterPerMessage: plan.maxCharacterPerMessage,
-    maxChatInFlight: plan.maxChatInFlight,
+    slug: pub.slug,
+    name: pub.name,
+    rateLimitPerMinute: pub.rateLimitPerMinute,
+    maxCharacterPerMessage: pub.maxCharacterPerMessage,
+    maxChatInFlight: pub.maxChatInFlight,
   };
 }
 

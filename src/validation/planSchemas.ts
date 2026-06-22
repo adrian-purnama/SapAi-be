@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isChatTaskType, modelLabelsForTask, CHAT_TASK_TYPES } from "../constants/taskCatalog.js";
+
 const slugSchema = z
   .string()
   .trim()
@@ -7,6 +9,34 @@ const slugSchema = z
   .min(1)
   .max(32)
   .regex(/^[a-z0-9][a-z0-9_-]*$/, "Slug must start with a letter or digit and use lowercase letters, digits, _, -.");
+
+const taskAccessSchema = z
+  .record(z.string(), z.array(z.string().trim().min(1)))
+  .superRefine((value, ctx) => {
+    for (const [taskType, labels] of Object.entries(value)) {
+      if (!isChatTaskType(taskType)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Unknown task type: ${taskType}`,
+          path: [taskType],
+        });
+        continue;
+      }
+      const allowed = new Set(modelLabelsForTask(taskType));
+      for (let i = 0; i < labels.length; i++) {
+        if (!allowed.has(labels[i]!)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Unknown model label "${labels[i]}" for task "${taskType}"`,
+            path: [taskType, i],
+          });
+        }
+      }
+    }
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one task type is required.",
+  });
 
 export const planCreateBodySchema = z.object({
   slug: slugSchema,
@@ -28,6 +58,9 @@ export const planCreateBodySchema = z.object({
   ragAnalyticsEnabled: z.boolean().optional().default(false),
   priceLabel: z.string().trim().max(64).nullable().optional(),
   priceNote: z.string().trim().max(64).nullable().optional(),
+  taskAccess: taskAccessSchema.optional().default(() =>
+    Object.fromEntries(CHAT_TASK_TYPES.map((t) => [t, modelLabelsForTask(t)])),
+  ),
 });
 
 export const planPatchBodySchema = planCreateBodySchema

@@ -12,6 +12,7 @@ import { registerEmbedRoutes } from "./routes/embed.js";
 import { registerEmbeddingRoutes } from "./routes/embedding.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerApiKeyRoutes } from "./routes/apiKeys.js";
+import { registerApiKeyAnalyticsRoutes } from "./routes/apiKeyAnalytics.js";
 import { registerFaqConstantRoutes } from "./routes/faqConstants.js";
 import { registerFaqDocumentRoutes } from "./routes/faqDocuments.js";
 import { registerClientIpRoutes } from "./routes/clientIp.js";
@@ -21,11 +22,10 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { registerUserRoutes } from "./routes/users.js";
 import { registerPlanRoutes } from "./routes/plans.js";
 import { registerAdminApiKeyRoutes } from "./routes/adminApiKeys.js";
+import { registerAdminChatJobRoutes } from "./routes/adminChatJobs.js";
 import { resolveOllamaEmbedModel } from "./ollama/callOllamaEmbed.js";
 import { reloadPlanRegistry } from "./services/planRegistry.js";
 import { clientErrorMessage, isProductionEnvironment } from "./utils/sanitizeError.js";
-
-let staleRunningChatJobsSweep: ReturnType<typeof setInterval> | null = null;
 
 const JSON_BODY_LIMIT = Number(process.env.JSON_BODY_LIMIT_BYTES ?? 262_144);
 
@@ -57,8 +57,11 @@ async function main(): Promise<void> {
         : (e.message ?? "Request failed.");
     void reply.code(status).send({
       success: false,
-      message,
-      code: status >= 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
+      data: null,
+      error: {
+        message,
+        code: status >= 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
+      },
     });
   });
 
@@ -95,10 +98,6 @@ async function main(): Promise<void> {
   }
 
   fastify.addHook("onClose", async () => {
-    if (staleRunningChatJobsSweep) {
-      clearInterval(staleRunningChatJobsSweep);
-      staleRunningChatJobsSweep = null;
-    }
     stopChatJobRunner();
     await shutdownRateLimitRedis();
     await mongoose.disconnect();
@@ -107,6 +106,7 @@ async function main(): Promise<void> {
   await registerHealthRoutes(fastify);
   await registerAuthRoutes(fastify);
   await registerApiKeyRoutes(fastify);
+  await registerApiKeyAnalyticsRoutes(fastify);
   await registerFaqDocumentRoutes(fastify);
   await registerFaqConstantRoutes(fastify);
   await registerClientIpRoutes(fastify);
@@ -115,6 +115,7 @@ async function main(): Promise<void> {
   await registerUserRoutes(fastify);
   await registerPlanRoutes(fastify);
   await registerAdminApiKeyRoutes(fastify);
+  await registerAdminChatJobRoutes(fastify);
   await registerEmbedRoutes(fastify);
   await registerChatRoutes(fastify);
   await registerEmbeddingRoutes(fastify);

@@ -122,15 +122,15 @@ function buildSystemPrompt(allowedCategories: string[], allowedAnswerable: strin
       : "";
 
   return (
-    "You classify a single user FAQ / RAG turn for analytics. Reply with ONE JSON object only — no markdown fences, no commentary.\n" +
+    "You classify a single user FAQ / RAG turn for analytics. Reply with ONE JSON object only   no markdown fences, no commentary.\n" +
     "Keys and semantics:\n" +
     "category: string" +
     (allowedCategories.length > 0
       ? "one of the allowed category strings above, or the literal \"none\"."
       : "always the literal \"none\".") +
     "\n" +
-    "- answerable: string — whether the assistant answer addresses the user question using the retrieval context as evidence (yes=no gaps; partial=some gaps; no=does not answer; unclear=ambiguous or empty answer). Must be exactly one allowed answerable value.\n" +
-    "- intent: string — the user's primary information need. Must be exactly one allowed intent value.\n" +
+    "- answerable: string   whether the assistant answer addresses the user question using the retrieval context as evidence (yes=no gaps; partial=some gaps; no=does not answer; unclear=ambiguous or empty answer). Must be exactly one allowed answerable value.\n" +
+    "- intent: string   the user's primary information need. Must be exactly one allowed intent value.\n" +
     "\n" +
     answerableBlock +
     intentBlock +

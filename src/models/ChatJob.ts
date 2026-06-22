@@ -76,6 +76,8 @@ const chatJobSchema = new mongoose.Schema(
     },
     model: { type: String, required: true },
     maxTokens: { type: Number, default: 500 },
+    /** `true` = main completion used DeepSeek overflow; `false` = Ollama; `null` until finished. */
+    useDeepSeek: { type: Boolean, default: null },
     input: { type: [chatMessageSchema], default: [] },
     result: { type: chatJobResultSchema, default: null },
     ragAnalysis: { type: chatJobRagAnalysisSchema, default: null },

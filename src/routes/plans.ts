@@ -2,11 +2,16 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import { requireBearerAdmin } from "../auth/requireBearerUser.js";
+import { getPublicTaskCatalog } from "../constants/taskCatalog.js";
 import { createPlan, deletePlan, getPlanById, listPlans, updatePlan } from "../services/plansService.js";
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
 import { planCreateBodySchema, planPatchBodySchema } from "../validation/planSchemas.js";
 
 export async function registerPlanRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.get("/api/v1/admin/task-catalog", { preHandler: requireBearerAdmin }, async (_request, reply) => {
+    return sendSuccess(reply, { catalog: getPublicTaskCatalog() });
+  });
+
   fastify.get("/api/v1/admin/plans", { preHandler: requireBearerAdmin }, async (_request, reply) => {
     try {
       const plans = await listPlans();

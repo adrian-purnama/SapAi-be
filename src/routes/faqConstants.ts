@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import mongoose from "mongoose";
 import { z } from "zod";
 
 import { requireBearerUser } from "../auth/requireBearerUser.js";
@@ -19,10 +18,6 @@ import { sendError, sendSuccess } from "../utils/apiResponse.js";
 import { isAllowedPublicImageMime, MAX_PUBLIC_IMAGE_BYTES } from "../utils/publicImageUpload.js";
 import { toAbsoluteUrlFromRequest } from "../utils/publicOriginFromRequest.js";
 import { requireActiveOwnedApiKey } from "../utils/requireOwnedApiKey.js";
-
-async function requireOwnedApiKey(userId: mongoose.Types.ObjectId, apiKeyId: string) {
-  return requireActiveOwnedApiKey(userId, apiKeyId);
-}
 
 function mapOwnedApiKeyGate(reply: Parameters<typeof sendError>[0], gate: { ok: false; error: string; status: number }) {
   const code =
@@ -100,7 +95,7 @@ export async function registerFaqConstantRoutes(fastify: FastifyInstance): Promi
     async (request, reply) => {
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         return mapOwnedApiKeyGate(reply, gate);
       }
@@ -122,7 +117,7 @@ export async function registerFaqConstantRoutes(fastify: FastifyInstance): Promi
     async (request, reply) => {
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         return mapOwnedApiKeyGate(reply, gate);
       }
@@ -149,7 +144,7 @@ export async function registerFaqConstantRoutes(fastify: FastifyInstance): Promi
     async (request, reply) => {
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         return mapOwnedApiKeyGate(reply, gate);
       }
@@ -194,7 +189,7 @@ export async function registerFaqConstantRoutes(fastify: FastifyInstance): Promi
     async (request, reply) => {
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         return mapOwnedApiKeyGate(reply, gate);
       }
@@ -222,7 +217,7 @@ export async function registerFaqConstantRoutes(fastify: FastifyInstance): Promi
     async (request, reply) => {
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         return mapOwnedApiKeyGate(reply, gate);
       }
@@ -281,7 +276,7 @@ export async function registerFaqConstantRoutes(fastify: FastifyInstance): Promi
     async (request, reply) => {
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         return mapOwnedApiKeyGate(reply, gate);
       }
@@ -308,7 +303,7 @@ export async function registerFaqConstantRoutes(fastify: FastifyInstance): Promi
     async (request, reply) => {
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         return mapOwnedApiKeyGate(reply, gate);
       }

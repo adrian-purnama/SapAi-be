@@ -1,10 +1,6 @@
 import type { FastifyRequest } from "fastify";
 
-function firstHeaderValue(v: unknown): string | null {
-  if (typeof v === "string") return v;
-  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
-  return null;
-}
+import { firstHeaderValue } from "./requestHeaders.js";
 
 /** Public site origin for absolute URLs (honors PUBLIC_BASE_URL, else forwarded Host). */
 export function getPublicOriginFromRequest(request: FastifyRequest): string | null {

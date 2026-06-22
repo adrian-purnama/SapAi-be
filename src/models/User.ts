@@ -8,6 +8,8 @@ const userSchema = new mongoose.Schema(
     isEmailVerified: { type: Boolean, default: false },
     isBlocked: { type: Boolean, default: false },
     plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+    /** When set, non-default assigned plans expire at this instant; null = never expires. */
+    planExpiresAt: { type: Date, default: null },
     termsAcceptedAt: { type: Date },
     /** Incremented on password change; invalidates older JWTs. */
     tokenVersion: { type: Number, default: 0, min: 0 },

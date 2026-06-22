@@ -31,6 +31,7 @@ const faqChunkSchema = new mongoose.Schema(
 
 faqChunkSchema.index({ faqDocumentId: 1, chunkIndex: 1 }, { unique: true });
 faqChunkSchema.index({ userId: 1, faqDocumentId: 1 });
+faqChunkSchema.index({ text: "text" });
 
 export type FaqChunkLean = InferSchemaType<typeof faqChunkSchema>;
 export type FaqChunkDocument = HydratedDocument<FaqChunkLean>;

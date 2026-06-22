@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 import type { FastifyReply, FastifyRequest } from "fastify";
 import mongoose from "mongoose";
 
@@ -7,11 +5,8 @@ import type { ApiKeyAuthContext } from "../types/authContext.js";
 import { getRateLimitPerMinuteForUserPlan, tryConsumeApiKeyRateSlot } from "./apiKeyRateLimit.js";
 import { ApiKeyModel } from "../models/ApiKey.js";
 import { UserModel } from "../models/User.js";
-import { resolvePlanForUser } from "../services/planRegistry.js";
-
-function sha256Hex(input: string): string {
-  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
-}
+import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
+import { sha256Hex } from "../utils/sha256.js";
 
 export function headerString(h: string | string[] | undefined): string | undefined {
   if (h === undefined) return undefined;
@@ -60,7 +55,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
-  // 2. Require MongoDB — auth lookups depend on ApiKey / User collections.
+  // 2. Require MongoDB   auth lookups depend on ApiKey / User collections.
   if (mongoose.connection.readyState !== 1) {
     return {
       ok: false,
@@ -95,8 +90,8 @@ export async function authenticatePlainApiKey(
     };
   }
 
-  // 5. Load owning user — key is invalid if the account row is missing.
-  const user = await UserModel.findById(apiKey.userId);
+  // 5. Load owning user   key is invalid if the account row is missing.
+  const user = await UserModel.findById(apiKey.userId).select("plan planExpiresAt email isAdmin isBlocked");
   if (!user) {
     return {
       ok: false,
@@ -113,7 +108,8 @@ export async function authenticatePlainApiKey(
   }
 
   // 7. Rate limit per API key, cap derived from the user's plan.
-  const perMinute = getRateLimitPerMinuteForUserPlan(user.plan);
+  const planCtx = { plan: user.plan, planExpiresAt: user.planExpiresAt };
+  const perMinute = getRateLimitPerMinuteForUserPlan(planCtx);
   if (!(await tryConsumeApiKeyRateSlot(apiKey._id.toString(), perMinute))) {
     return {
       ok: false,
@@ -127,7 +123,7 @@ export async function authenticatePlainApiKey(
     };
   }
 
-  // 8. IP allowlist — skipped when empty or when allowlist contains 0.0.0.0 (allow all).
+  // 8. IP allowlist   skipped when empty or when allowlist contains 0.0.0.0 (allow all).
   const allowlist = (apiKey.ipAllowlist ?? []).map((s) => String(s).trim()).filter(Boolean);
   if (allowlist.length > 0 && !allowlistAllowsAll(allowlist)) {
     const ip = getClientIp(request);
@@ -139,7 +135,7 @@ export async function authenticatePlainApiKey(
     }
   }
 
-  // 9. Success — record last use (fire-and-forget).
+  // 9. Success   record last use (fire-and-forget).
   void ApiKeyModel.updateOne({ _id: apiKey._id }, { $set: { lastUsedAt: new Date() } }).catch(
     () => undefined,
   );
@@ -148,7 +144,7 @@ export async function authenticatePlainApiKey(
   const ctx: ApiKeyAuthContext = {
     apiKeyId: apiKey._id.toString(),
     userId: user._id.toString(),
-    plan: resolvePlanForUser(user.plan)?.slug ?? "unknown",
+    plan: resolveEffectivePlanForUser(planCtx)?.slug ?? "unknown",
     label: apiKey.label,
     prefix: apiKey.prefix,
     email: user.email,

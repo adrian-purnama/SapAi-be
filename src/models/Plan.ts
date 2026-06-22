@@ -1,5 +1,7 @@
 import mongoose, { type HydratedDocument, type InferSchemaType, type Model } from "mongoose";
 
+import { DEFAULT_TASK_ACCESS } from "../constants/taskCatalog.js";
+
 /**
  * Admin-configurable subscription plan. Intended to replace hardcoded tier constants
  * for limits, queue behavior, retention, and feature flags on users (`User.plan` → `slug`).
@@ -52,6 +54,12 @@ const planSchema = new mongoose.Schema(
     /** Optional display pricing (minor units or arbitrary; interpret in admin UI). */
     priceLabel: { type: String, default: null, trim: true, maxlength: 64 },
     priceNote: { type: String, default: null, trim: true, maxlength: 64 },
+
+    /** Per-task allowed public model labels (keys = task types from task catalog). */
+    taskAccess: {
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({ ...DEFAULT_TASK_ACCESS }),
+    },
   },
   { timestamps: true, collection: "plans" },
 );

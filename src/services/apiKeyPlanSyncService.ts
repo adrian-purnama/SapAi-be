@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 import { ApiKeyModel } from "../models/ApiKey.js";
 import { UserModel } from "../models/User.js";
-import { resolvePlanForUser } from "./planRegistry.js";
+import { resolveEffectivePlanForUser } from "./planRegistry.js";
 
 export type SyncUserApiKeysResult = {
   primaryId: string | null;
@@ -18,8 +18,8 @@ export type SyncAllUsersApiKeysResult = {
   primariesAssigned: number;
 };
 
-function readMaxApiKeysForUser(planRef: unknown): number {
-  const plan = resolvePlanForUser(planRef);
+function readMaxApiKeysForUser(ctx: { plan?: unknown; planExpiresAt?: Date | null }): number {
+  const plan = resolveEffectivePlanForUser(ctx);
   if (!plan) return 1;
   const n = plan.maxApiKeys;
   if (!Number.isFinite(n) || n < 0) return 1;
@@ -33,8 +33,8 @@ function readMaxApiKeysForUser(planRef: unknown): number {
 export async function syncUserApiKeysToPlan(
   userId: mongoose.Types.ObjectId,
 ): Promise<SyncUserApiKeysResult> {
-  const user = await UserModel.findById(userId).select("plan").lean();
-  const maxEnabled = readMaxApiKeysForUser(user?.plan);
+  const user = await UserModel.findById(userId).select("plan planExpiresAt").lean();
+  const maxEnabled = readMaxApiKeysForUser(user ?? {});
 
   const keys = await ApiKeyModel.find({ userId, revokedAt: null })
     .sort({ createdAt: 1 })

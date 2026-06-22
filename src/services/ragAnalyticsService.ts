@@ -2,43 +2,10 @@ import mongoose from "mongoose";
 
 import { FAQ_INTENT_VALUES } from "../constants/faqDocument.js";
 import { ChatJobModel } from "../models/ChatJob.js";
+import { LAST_USER_CONTENT_FROM_INPUT } from "../utils/lastUserMessage.js";
 
 const TOP_CATEGORIES = 15;
 const WEAK_ANSWERS = 15;
-
-/** Last user `content` in `input` order (same semantics as dashboard extraction). */
-const LAST_USER_CONTENT_FROM_INPUT: Record<string, unknown> = {
-  $let: {
-    vars: {
-      userMsgs: {
-        $filter: {
-          input: { $ifNull: ["$input", []] },
-          as: "m",
-          cond: { $eq: ["$$m.role", "user"] },
-        },
-      },
-    },
-    in: {
-      $let: {
-        vars: {
-          n: { $size: "$$userMsgs" },
-        },
-        in: {
-          $cond: [
-            { $gt: ["$$n", 0] },
-            {
-              $let: {
-                vars: { last: { $arrayElemAt: ["$$userMsgs", { $subtract: ["$$n", 1] }] } },
-                in: { $ifNull: ["$$last.content", ""] },
-              },
-            },
-            "",
-          ],
-        },
-      },
-    },
-  },
-};
 
 export type RagAnalyticsFilters = {
   from?: Date;
@@ -209,7 +176,7 @@ export async function getRagAnalyticsSummary(
   ]).then((rows) =>
     rows.map((r) => ({
       fingerprint: typeof r._id === "string" && r._id.startsWith("__job_") ? null : r._id,
-      sampleQuestion: (r.sample && String(r.sample).trim()) || "—",
+      sampleQuestion: (r.sample && String(r.sample).trim()) || " ",
       count: r.n,
       lastAt: r.lastAt ? new Date(r.lastAt).toISOString() : null,
       sampleJobId: r.sampleJobId ? String(r.sampleJobId) : null,

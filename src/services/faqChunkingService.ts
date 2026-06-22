@@ -1,66 +1,37 @@
 import mongoose from "mongoose";
 
 import { FAQ_ALLOWED_EXTENSION } from "../constants/faqDocument.js";
+import { resolveEmbedBackendModel } from "../constants/taskCatalog.js";
+import { readOllamaEnv } from "../ollama/callOllamaChat.js";
 import {
   callOllamaEmbed,
   readOllamaEmbedMaxChars,
-  readOllamaEmbedModel,
 } from "../ollama/callOllamaEmbed.js";
 import { FaqChunkModel } from "../models/FaqChunk.js";
 import { FaqDocumentModel } from "../models/FaqDocument.js";
+import { extFromFilename } from "../utils/filename.js";
 import { upsertFaqChunkVectors, type FaqChunkQdrantPoint } from "./qdrantFaqChunksService.js";
 
-/** Hard ceiling for stored FAQ chunk text (`FAQ_CHUNK_MAX_CHARS` env). */
 export const FAQ_CHUNK_MAX_CHARS_CEILING = 8000;
+export const FAQ_CHUNK_MAX_CHARS = 1200;
+export const FAQ_CHUNK_OVERLAP = Math.min(200, Math.floor(FAQ_CHUNK_MAX_CHARS / 8));
+export const FAQ_CHUNK_INSERT_BATCH = 50;
+export const FAQ_EMBED_BATCH_SIZE = 8;
 
-const DEFAULT_FAQ_CHUNK_MAX_CHARS = 1200;
-
-export function readFaqChunkMaxChars(): number {
-  const raw = process.env.FAQ_CHUNK_MAX_CHARS?.trim();
-  if (raw) {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n) && n >= 100) {
-      return Math.min(n, FAQ_CHUNK_MAX_CHARS_CEILING);
-    }
-  }
-  return DEFAULT_FAQ_CHUNK_MAX_CHARS;
+function readFaqChunkMaxChars(): number {
+  return FAQ_CHUNK_MAX_CHARS;
 }
 
-export function readFaqChunkOverlap(): number {
-  const maxChars = readFaqChunkMaxChars();
-  const raw = process.env.FAQ_CHUNK_OVERLAP?.trim();
-  if (raw) {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n) && n >= 0 && n < maxChars) return n;
-  }
-  return Math.min(200, Math.max(0, Math.floor(maxChars / 8)));
+function readFaqChunkOverlap(): number {
+  return FAQ_CHUNK_OVERLAP;
 }
 
-const DEFAULT_FAQ_CHUNK_INSERT_BATCH = 50;
-const DEFAULT_FAQ_EMBED_BATCH_SIZE = 8;
-
-export function readFaqChunkInsertBatchSize(): number {
-  const raw = process.env.FAQ_CHUNK_INSERT_BATCH?.trim();
-  if (raw) {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n) && n >= 10 && n <= 500) return n;
-  }
-  return DEFAULT_FAQ_CHUNK_INSERT_BATCH;
+function readFaqChunkInsertBatchSize(): number {
+  return FAQ_CHUNK_INSERT_BATCH;
 }
 
-export function readFaqEmbedBatchSize(): number {
-  const raw = process.env.FAQ_EMBED_BATCH_SIZE?.trim();
-  if (raw) {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n) && n >= 1 && n <= 32) return n;
-  }
-  return DEFAULT_FAQ_EMBED_BATCH_SIZE;
-}
-
-function extFromFilename(filename: string): string {
-  const i = filename.lastIndexOf(".");
-  if (i < 0) return "";
-  return filename.slice(i).toLowerCase();
+function readFaqEmbedBatchSize(): number {
+  return FAQ_EMBED_BATCH_SIZE;
 }
 
 function normalizeWhitespace(text: string): string {
@@ -68,7 +39,7 @@ function normalizeWhitespace(text: string): string {
 }
 
 const LEGACY_UNSUPPORTED_MESSAGE =
-  "This file type is no longer supported. Upload Markdown (.md) only — copy or export your content as UTF-8 text.";
+  "This file type is no longer supported. Upload Markdown (.md) only   copy or export your content as UTF-8 text.";
 
 export function chunkPlainText(
   text: string,
@@ -290,10 +261,6 @@ export type ProcessFaqChunksCheckpointResult = {
   qdrantUpserted: number;
 };
 
-function readOllamaBaseUrl(): string {
-  return process.env.OLLAMA_BASE_URL?.trim() || "http://localhost:11434";
-}
-
 function splitTextForEmbed(text: string, maxChars: number): string[] {
   const t = text.trim();
   if (t.length <= maxChars) return [t];
@@ -327,8 +294,8 @@ async function embedChunkText(text: string): Promise<{ embedding: number[]; mode
   const maxChars = readOllamaEmbedMaxChars();
   const parts = splitTextForEmbed(text, maxChars);
   const res = await callOllamaEmbed({
-    baseUrl: readOllamaBaseUrl(),
-    model: readOllamaEmbedModel(),
+    baseUrl: readOllamaEnv().baseUrl,
+    model: resolveEmbedBackendModel(),
     input: parts.length === 1 ? parts[0]! : parts,
   });
   if (!res.embeddings.length) {
@@ -372,8 +339,8 @@ async function embedChunkRowsBatch(
   }
 
   const res = await callOllamaEmbed({
-    baseUrl: readOllamaBaseUrl(),
-    model: readOllamaEmbedModel(),
+    baseUrl: readOllamaEnv().baseUrl,
+    model: resolveEmbedBackendModel(),
     input: flatInputs.length === 1 ? flatInputs[0]! : flatInputs,
   });
 

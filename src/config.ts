@@ -1,4 +1,4 @@
-import "dotenv/config";
+import { stripQuotes } from "./utils/env.js";
 
 export type AppConfig = {
   appName: string;
@@ -11,25 +11,13 @@ export type AppConfig = {
   apiVersion: string;
 };
 
-function stripQuotes(v: string): string {
-  const t = v.trim();
-  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
-    return t.slice(1, -1);
-  }
-  return t;
-}
-
 /** Browser origins allowed to call this API (`@fastify/cors`). */
 function resolveCorsOrigins(): string {
   const explicit = process.env.CORS_ORIGINS?.trim();
   if (explicit) return stripQuotes(explicit);
 
-  const fromFrontend =
-    process.env.FE_LINK?.trim() ||
-    process.env.FRONTEND_URL?.trim() ||
-    process.env.PUBLIC_APP_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (fromFrontend) return stripQuotes(fromFrontend);
+  const fallback = process.env.PUBLIC_APP_URL?.trim();
+  if (fallback) return stripQuotes(fallback);
 
   return "http://localhost:3000";
 }

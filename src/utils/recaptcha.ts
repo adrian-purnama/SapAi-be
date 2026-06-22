@@ -1,13 +1,7 @@
 const VERIFY_URL = "https://www.google.com/recaptcha/api/siteverify";
 export const RECAPTCHA_EMBED_CHAT_ACTION = "embed_chat";
 
-function stripQuotes(v: string): string {
-  const t = v.trim();
-  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
-    return t.slice(1, -1);
-  }
-  return t;
-}
+import { stripQuotes } from "./env.js";
 
 export function readRecaptchaSecretKey(): string | null {
   const raw = process.env.RECAPTCHA_SECRET_KEY?.trim();

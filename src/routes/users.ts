@@ -9,10 +9,17 @@ import { UserModel } from "../models/User.js";
 import { sendPasswordResetEmail } from "../services/brevoService.js";
 import { hashPassword } from "../services/passwordService.js";
 import { upsertOtpForEmail } from "../services/otpService.js";
-import { validatePasswordForAuth } from "../utils/passwordInput.js";
-import { PlanModel } from "../models/Plan.js";
+import { validatePasswordForAuth } from "../utils/passwordPolicy.js";
 import { syncUserApiKeysToPlan } from "../services/apiKeyPlanSyncService.js";
+import {
+  getDefaultPlanFromRegistry,
+  getPlanByIdFromRegistry,
+  isUserPlanExpired,
+  resolveEffectivePlanForUser,
+  resolvePlanForUser,
+} from "../services/planRegistry.js";
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
+import { getPlanTaskAccessView, parsePlanExpiresAtInput, planToPublicSnapshot } from "../utils/planAccess.js";
 
 const USER_PLAN_POPULATE = { path: "plan", select: "slug name" } as const;
 
@@ -29,9 +36,14 @@ function mapAdminUser(u: {
   isEmailVerified?: boolean;
   isBlocked?: boolean;
   plan?: unknown;
+  planExpiresAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }) {
+  const planCtx = { plan: u.plan, planExpiresAt: u.planExpiresAt };
+  const assigned = resolvePlanForUser(u.plan);
+  const effective = resolveEffectivePlanForUser(planCtx);
+  const expired = assigned && !assigned.isDefault ? isUserPlanExpired(planCtx) : false;
   return {
     id: u._id.toString(),
     email: u.email,
@@ -40,6 +52,13 @@ function mapAdminUser(u: {
     isEmailVerified: Boolean(u.isEmailVerified),
     isBlocked: Boolean(u.isBlocked),
     plan: mapPopulatedPlan(u.plan),
+    planExpiresAt: u.planExpiresAt
+      ? u.planExpiresAt instanceof Date
+        ? u.planExpiresAt.toISOString()
+        : String(u.planExpiresAt)
+      : null,
+    isPlanExpired: expired,
+    effectivePlan: effective ? { slug: effective.slug, name: effective.name } : null,
     createdAt: u.createdAt ?? null,
     updatedAt: u.updatedAt ?? null,
   };
@@ -50,7 +69,7 @@ function maskEmail(email: string): string {
   const [localRaw, domainRaw] = e.split("@");
   const local = (localRaw ?? "").trim();
   const domain = (domainRaw ?? "").trim();
-  if (!local || !domain) return "—";
+  if (!local || !domain) return " ";
   const first = local[0] ?? "*";
   const last = local.length > 1 ? local[local.length - 1] : "*";
   const stars = local.length <= 2 ? "*" : "*".repeat(Math.min(6, local.length - 2));
@@ -59,7 +78,7 @@ function maskEmail(email: string): string {
 
 export async function registerUserRoutes(fastify: FastifyInstance): Promise<void> {
   /**
-   * API-key scoped "me" — useful for embedded clients to check plan, token balance, and queue status.
+   * API-key scoped "me"   useful for embedded clients to check plan, token balance, and queue status.
    * Auth: `x-api-key`.
    */
   fastify.get("/api/v1/api-key/me", { preHandler: requireApiKey }, async (request, reply) => {
@@ -79,14 +98,36 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
       ChatJobModel.findOne({ apiKeyId }).sort({ createdAt: -1 }).select({ createdAt: 1, status: 1 }).lean(),
     ]);
 
+    const planCtx = { plan: user.plan, planExpiresAt: user.planExpiresAt };
+    const assignedPlan = resolvePlanForUser(user.plan);
+    const planSnap = resolveEffectivePlanForUser(planCtx) ?? getDefaultPlanFromRegistry();
+    const isExpired = assignedPlan && !assignedPlan.isDefault ? isUserPlanExpired(planCtx) : false;
+
     return sendSuccess(reply, {
       apiKey: { id: auth.apiKeyId, label: auth.label, prefix: auth.prefix },
       user: {
         id: auth.userId,
         emailMasked: maskEmail(user.email),
-        plan: mapPopulatedPlan(user.plan),
         isBlocked: Boolean(user.isBlocked),
       },
+      plan: planSnap
+        ? {
+            id: planSnap.id,
+            slug: planSnap.slug,
+            name: planSnap.name,
+            limits: planToPublicSnapshot(planSnap),
+            access: getPlanTaskAccessView(planSnap),
+          }
+        : null,
+      assignedPlan: assignedPlan
+        ? { id: assignedPlan.id, slug: assignedPlan.slug, name: assignedPlan.name }
+        : null,
+      planExpiresAt: user.planExpiresAt
+        ? user.planExpiresAt instanceof Date
+          ? user.planExpiresAt.toISOString()
+          : String(user.planExpiresAt)
+        : null,
+      isExpired,
       jobs: {
         active: activeJobs,
         lastJobAt: lastJob?.createdAt ?? null,
@@ -131,6 +172,7 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
           isEmailVerified: 1,
           isBlocked: 1,
           plan: 1,
+          planExpiresAt: 1,
           createdAt: 1,
           updatedAt: 1,
         })
@@ -159,6 +201,7 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
         isEmailVerified: 1,
         isBlocked: 1,
         plan: 1,
+        planExpiresAt: 1,
         createdAt: 1,
         updatedAt: 1,
       })
@@ -176,27 +219,67 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
 
     const body = z
       .object({
-        planId: z.string().optional(),
+        planId: z.union([z.string(), z.null()]).optional(),
+        planExpiresAt: z.union([z.string(), z.null()]).optional(),
         isBlocked: z.boolean().optional(),
       })
       .safeParse(request.body);
     if (!body.success) return sendError(reply, "Invalid request body.", 400, "INVALID_BODY");
 
+    const current = await UserModel.findById(id).select("plan planExpiresAt").lean();
+    if (!current) return sendError(reply, "User not found.", 404, "USER_NOT_FOUND");
+
     const update: Record<string, unknown> = {};
+    let needsApiKeySync = false;
+
     if (body.data.planId !== undefined) {
-      const planId = body.data.planId.trim();
+      const planId = body.data.planId == null ? "" : body.data.planId.trim();
       if (!planId) {
         update.plan = null;
+        update.planExpiresAt = null;
+        needsApiKeySync = true;
       } else {
         if (!mongoose.Types.ObjectId.isValid(planId)) {
           return sendError(reply, "Invalid plan id.", 400, "INVALID_PLAN_ID");
         }
-        const planExists = await PlanModel.exists({ _id: new mongoose.Types.ObjectId(planId) });
-        if (!planExists) return sendError(reply, "Plan not found.", 404, "PLAN_NOT_FOUND");
+        const target = getPlanByIdFromRegistry(planId);
+        if (!target) return sendError(reply, "Plan not found.", 404, "PLAN_NOT_FOUND");
         update.plan = new mongoose.Types.ObjectId(planId);
+        if (target.isDefault) {
+          update.planExpiresAt = null;
+        } else if (body.data.planExpiresAt === undefined) {
+          return sendError(
+            reply,
+            "Expiry date is required when assigning a non-default plan.",
+            400,
+            "PLAN_EXPIRY_REQUIRED",
+          );
+        }
+        needsApiKeySync = true;
       }
     }
+
+    if (body.data.planExpiresAt !== undefined) {
+      let parsed: Date | null;
+      try {
+        parsed = parsePlanExpiresAtInput(body.data.planExpiresAt);
+      } catch {
+        return sendError(reply, "Invalid plan expiry date.", 400, "INVALID_PLAN_EXPIRY");
+      }
+      const planRef = update.plan !== undefined ? update.plan : current.plan;
+      const assigned = resolvePlanForUser(planRef);
+      if (!assigned || assigned.isDefault) {
+        return sendError(reply, "Expiry applies only to non-default plans.", 400, "PLAN_EXPIRY_NOT_ALLOWED");
+      }
+      update.planExpiresAt = parsed;
+      needsApiKeySync = true;
+    }
+
     if (typeof body.data.isBlocked === "boolean") update.isBlocked = body.data.isBlocked;
+
+    if (Object.keys(update).length === 0) {
+      return sendError(reply, "No changes provided.", 400, "INVALID_BODY");
+    }
 
     const user = await UserModel.findByIdAndUpdate(id, { $set: update }, { new: true })
       .populate(USER_PLAN_POPULATE)
@@ -204,7 +287,7 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
     if (!user) return sendError(reply, "User not found.", 404, "USER_NOT_FOUND");
 
     let apiKeySync: Awaited<ReturnType<typeof syncUserApiKeysToPlan>> | undefined;
-    if (body.data.planId !== undefined) {
+    if (needsApiKeySync) {
       apiKeySync = await syncUserApiKeysToPlan(new mongoose.Types.ObjectId(id));
     }
 

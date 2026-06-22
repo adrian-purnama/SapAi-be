@@ -5,23 +5,45 @@ import {
   MAX_CHAT_MAX_TOKENS,
   MAX_CHAT_OUTPUT_JSON_TEMPLATE_CHARS,
 } from "../constants/chatLimits.js";
-import { ALLOWED_CHAT_MODEL_IDS, TRANSLATE_JOB_MODEL_LABEL } from "../constants/chatModels.js";
+import {
+  CHAT_TASK_TYPES,
+  modelLabelsForTask,
+  TRANSLATE_JOB_MODEL_LABEL,
+} from "../constants/taskCatalog.js";
 import { buildTranslatePrompt } from "../utils/buildTranslatePrompt.js";
 import { assertTranslateTextWithinPlanLimits } from "../utils/planChatLimits.js";
 
-export const CHAT_TASK_TYPES = ["chat", "rag", "translate"] as const;
+export { CHAT_TASK_TYPES };
 
-const MODEL_LABELS = ALLOWED_CHAT_MODEL_IDS.map((m) => m.label) as unknown as [string, ...string[]];
-const modelEnum = z.enum(MODEL_LABELS);
+function labelsToEnum(labels: string[]) {
+  if (labels.length === 0) {
+    throw new Error("taskCatalog: task has no model labels");
+  }
+  return z.enum(labels as unknown as [string, ...string[]]);
+}
+
+const chatModelEnum = labelsToEnum(modelLabelsForTask("chat"));
+const ragModelEnum = labelsToEnum(modelLabelsForTask("rag"));
 
 const chatMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant", "tool"]),
   content: z.string().trim().min(1, "Message cannot be empty"),
 });
 
-const chatOrRagBodySchema = z.object({
-  taskType: z.enum(["chat", "rag"]),
-  model: modelEnum,
+const chatBodySchema = z.object({
+  taskType: z.literal("chat"),
+  model: chatModelEnum,
+  input: z
+    .array(chatMessageSchema)
+    .min(1, "At least one message is required")
+    .max(MAX_CHAT_INPUT_MESSAGES),
+  maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
+  outputJsonTemplate: z.string().max(MAX_CHAT_OUTPUT_JSON_TEMPLATE_CHARS).optional(),
+});
+
+const ragBodySchema = z.object({
+  taskType: z.literal("rag"),
+  model: ragModelEnum,
   input: z
     .array(chatMessageSchema)
     .min(1, "At least one message is required")
@@ -41,14 +63,15 @@ const translateBodySchema = z.object({
 });
 
 export const chatJobCreateBodySchema = z.discriminatedUnion("taskType", [
-  chatOrRagBodySchema,
+  chatBodySchema,
+  ragBodySchema,
   translateBodySchema,
 ]);
 
 export type ChatJobCreateBodyParsed = z.infer<typeof chatJobCreateBodySchema>;
 
 export type NormalizedChatJobCreateBody = {
-  taskType: (typeof CHAT_TASK_TYPES)[number];
+  taskType: string;
   model: string;
   input: { role: "system" | "user" | "assistant" | "tool"; content: string }[];
   maxTokens?: number;

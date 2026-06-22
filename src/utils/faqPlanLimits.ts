@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 import { FaqDocumentModel } from "../models/FaqDocument.js";
 import { UserModel } from "../models/User.js";
-import { resolvePlanForUser } from "../services/planRegistry.js";
+import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
 
 const DEFAULT_MAX_PDF_MB = 15;
 const DEFAULT_MAX_PDF_COUNT = 5;
@@ -25,8 +25,8 @@ export class FaqPlanLimitError extends Error {
 }
 
 export async function getFaqLimitsForUser(userId: mongoose.Types.ObjectId): Promise<FaqPlanLimits> {
-  const user = await UserModel.findById(userId).select("plan").lean();
-  const plan = resolvePlanForUser(user?.plan);
+  const user = await UserModel.findById(userId).select("plan planExpiresAt").lean();
+  const plan = resolveEffectivePlanForUser({ plan: user?.plan, planExpiresAt: user?.planExpiresAt });
   const maxPdfMb = plan?.maxPdfMb ?? DEFAULT_MAX_PDF_MB;
   const maxPdfUpload = plan?.maxPdfUpload ?? DEFAULT_MAX_PDF_COUNT;
   return {

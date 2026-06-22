@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 
 import { requireApiKey } from "../auth/requireApiKey.js";
 import { getPlanUsageLimitsForUser } from "../utils/planChatLimits.js";
+import { sendSuccess } from "../utils/apiResponse.js";
 import { isProductionEnvironment } from "../utils/sanitizeError.js";
 
 export async function registerHealthRoutes(fastify: FastifyInstance): Promise<void> {
@@ -75,18 +76,21 @@ export async function registerHealthRoutes(fastify: FastifyInstance): Promise<vo
     };
   });
 
-  fastify.get("/test", async () => ({ ok: true, message: "Hello, World!" }));
+  if (!isProductionEnvironment()) {
+    fastify.get("/test", async (_request, reply) =>
+      sendSuccess(reply, { message: "Hello, World!" }),
+    );
 
-  fastify.get("/test/api-key", { preHandler: requireApiKey }, async (request) => {
-    const a = request.apiAuth!;
-    const limits = await getPlanUsageLimitsForUser(a.userId);
-    return {
-      ok: true,
-      apiLabel: a.label,
-      currentPlan: limits.plan?.name ?? null,
-      rateLimitPerMinute: limits.rateLimitPerMinute,
-      maxCharacterPerMessage: limits.maxCharacterPerMessage,
-      maxChatInFlight: limits.maxChatInFlight,
-    };
-  });
+    fastify.get("/test/api-key", { preHandler: requireApiKey }, async (request, reply) => {
+      const a = request.apiAuth!;
+      const limits = await getPlanUsageLimitsForUser(a.userId);
+      return sendSuccess(reply, {
+        apiLabel: a.label,
+        currentPlan: limits.plan?.name ?? null,
+        rateLimitPerMinute: limits.rateLimitPerMinute,
+        maxCharacterPerMessage: limits.maxCharacterPerMessage,
+        maxChatInFlight: limits.maxChatInFlight,
+      });
+    });
+  }
 }

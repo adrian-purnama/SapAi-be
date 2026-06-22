@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 
 import { requireApiKey } from "../auth/requireApiKey.js";
-import { callOllamaEmbed, readOllamaEmbedModel } from "../ollama/callOllamaEmbed.js";
+import { resolveEmbedBackendModel } from "../constants/taskCatalog.js";
+import { callOllamaEmbed } from "../ollama/callOllamaEmbed.js";
 import { readOllamaEnv } from "../ollama/callOllamaChat.js";
 import { embeddingBodySchema } from "../schemas/embeddingBody.js";
 
@@ -17,7 +18,7 @@ export async function registerEmbeddingRoutes(fastify: FastifyInstance): Promise
     }
 
     const body = parsed.data;
-    const model = body.model?.trim() || readOllamaEmbedModel();
+    const model = body.model?.trim() || resolveEmbedBackendModel();
     const { baseUrl } = readOllamaEnv();
 
     try {

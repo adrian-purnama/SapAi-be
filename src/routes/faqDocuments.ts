@@ -26,10 +26,6 @@ import { assertFaqUploadAllowed, FaqPlanLimitError } from "../utils/faqPlanLimit
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
 import { requireActiveOwnedApiKey } from "../utils/requireOwnedApiKey.js";
 
-async function requireOwnedApiKey(userId: mongoose.Types.ObjectId, apiKeyId: string) {
-  return requireActiveOwnedApiKey(userId, apiKeyId);
-}
-
 function mapLimitError(reply: Parameters<typeof sendError>[0], err: FaqPlanLimitError) {
   const status = err.code === "PDF_LIMIT_REACHED" ? 403 : 400;
   return sendError(reply, err.message, status, err.code);
@@ -79,7 +75,7 @@ export async function registerFaqDocumentRoutes(fastify: FastifyInstance): Promi
       const user = request.bearerUser!;
       const id = String((request.params as { id?: string })?.id ?? "");
 
-      const gate = await requireOwnedApiKey(user._id, id);
+      const gate = await requireActiveOwnedApiKey(user._id, id);
       if (!gate.ok) {
         const code =
           gate.status === 403 ? "API_KEY_DISABLED" : gate.status === 400 ? "INVALID_ID" : "NOT_FOUND";
@@ -135,7 +131,7 @@ export async function registerFaqDocumentRoutes(fastify: FastifyInstance): Promi
       const apiKeyId = String((request.query as { apiKeyId?: string })?.apiKeyId ?? "").trim();
       if (!apiKeyId) return sendError(reply, "Missing apiKeyId query parameter.", 400, "API_KEY_REQUIRED");
 
-      const gate = await requireOwnedApiKey(user._id, apiKeyId);
+      const gate = await requireActiveOwnedApiKey(user._id, apiKeyId);
       if (!gate.ok) {
         const code =
           gate.status === 403 ? "API_KEY_DISABLED" : gate.status === 400 ? "INVALID_ID" : "NOT_FOUND";

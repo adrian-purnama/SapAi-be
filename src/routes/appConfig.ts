@@ -4,42 +4,12 @@ import { requireBearerAdmin } from "../auth/requireBearerUser.js";
 import { AppConfigModel } from "../models/AppConfig.js";
 import { deletePublicFile, updatePublicFile } from "../services/publicFilesService.js";
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
+import {
+  toAbsoluteUrlFromRequest,
+} from "../utils/publicOriginFromRequest.js";
 import { isAllowedPublicImageMime, MAX_PUBLIC_IMAGE_BYTES } from "../utils/publicImageUpload.js";
 
 const MAX_LOGO_BYTES = MAX_PUBLIC_IMAGE_BYTES;
-
-function firstHeaderValue(v: unknown): string | null {
-  if (typeof v === "string") return v;
-  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
-  return null;
-}
-
-function getPublicOrigin(request: any): string | null {
-  const envBase = process.env.PUBLIC_BASE_URL?.trim();
-  if (envBase) return envBase.replace(/\/$/, "");
-
-  const proto =
-    firstHeaderValue(request.headers?.["x-forwarded-proto"])?.split(",")[0]?.trim() ||
-    (request.protocol as string | undefined) ||
-    "http";
-  const host =
-    firstHeaderValue(request.headers?.["x-forwarded-host"])?.split(",")[0]?.trim() ||
-    firstHeaderValue(request.headers?.host)?.trim() ||
-    null;
-  if (!host) return null;
-  return `${proto}://${host}`;
-}
-
-function toAbsoluteUrl(request: any, maybePath: string | null): string | null {
-  if (!maybePath) return null;
-  const raw = maybePath.trim();
-  if (!raw) return null;
-  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  const origin = getPublicOrigin(request);
-  if (!origin) return raw;
-  const path = raw.startsWith("/") ? raw : `/${raw}`;
-  return `${origin}${path}`;
-}
 
 function parseBooleanInput(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
@@ -81,7 +51,7 @@ export async function registerAppConfigRoutes(fastify: FastifyInstance): Promise
           : brandLogoFileId
             ? `/api/v1/files/${brandLogoFileId}`
             : null;
-      const brandLogoUrl = toAbsoluteUrl(request, brandLogoPath);
+      const brandLogoUrl = toAbsoluteUrlFromRequest(request, brandLogoPath);
 
       return sendSuccess(reply, {
         appName: config.appName,
@@ -185,7 +155,7 @@ export async function registerAppConfigRoutes(fastify: FastifyInstance): Promise
             : logoIdAfter
               ? `/api/v1/files/${logoIdAfter}`
               : null;
-        const logoUrlAfter = toAbsoluteUrl(request, logoPathAfter);
+        const logoUrlAfter = toAbsoluteUrlFromRequest(request, logoPathAfter);
 
         return sendSuccess(reply, {
           appName: config.appName,

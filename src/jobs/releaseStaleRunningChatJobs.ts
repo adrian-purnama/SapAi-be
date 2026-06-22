@@ -1,16 +1,10 @@
 import mongoose from "mongoose";
 
 import { ChatJobModel } from "../models/ChatJob.js";
+import { readIntEnv } from "../utils/env.js";
 
 const STALE_MSG =
   "Job was still running after the stale threshold; retries exhausted. See CHAT_JOB_STALE_RUNNING_MS.";
-
-function readIntEnv(name: string, fallback: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
 
 /**
  * Finds `chatjobs` stuck in `status: "running"` (crashed worker, hung Ollama, etc.),

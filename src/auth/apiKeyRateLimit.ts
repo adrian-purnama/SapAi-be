@@ -1,6 +1,6 @@
 /** Per-API-key / embed rate limits via shared store (Redis when REDIS_URL is set). */
 
-import { resolvePlanForUser } from "../services/planRegistry.js";
+import { resolveEffectivePlanForUser, type UserPlanContext } from "../services/planRegistry.js";
 import { consumeRateLimitSlot } from "./rateLimitStore.js";
 
 /** Fallback when the user has no resolvable plan. */
@@ -13,11 +13,11 @@ export function readDefaultApiKeyRateLimitPerMinute(): number {
 }
 
 /**
- * Requests per minute from the user's assigned plan (`User.plan` → Plan).
+ * Requests per minute from the user's effective plan.
  * `0` = unlimited. Falls back to env default when no plan is found.
  */
-export function getRateLimitPerMinuteForUserPlan(planRef: unknown): number {
-  const plan = resolvePlanForUser(planRef);
+export function getRateLimitPerMinuteForUserPlan(ctx: UserPlanContext): number {
+  const plan = resolveEffectivePlanForUser(ctx);
   if (plan) {
     const v = plan.rateLimitPerMinute;
     if (Number.isFinite(v) && v >= 0) return Math.min(v, 1_000_000);
