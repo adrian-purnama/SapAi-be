@@ -7,6 +7,7 @@ type ModelDef = {
 export const MODELS = {
   OCT3Q: { provider: "ollama", id: "gemma4:12b" },
   TRANSLATE: { provider: "ollama", id: "translategemma", env: "OLLAMA_TRANSLATE_MODEL" },
+  ocr: { provider: "ollama", id: "glm-ocr:bf16" },
   EMBED: { provider: "ollama", id: "nomic-embed-text" },
 } as const satisfies Record<string, ModelDef>;
 
@@ -16,6 +17,7 @@ export const TASKS = {
   chat: { models: ["OCT3Q"] },
   rag: { models: ["OCT3Q"] },
   translate: { models: ["TRANSLATE"] },
+  ocr: { models: ["ocr"] },
 } as const satisfies Record<string, { models: readonly ModelLabel[] }>;
 
 export const INFRA = { embed: "EMBED" } as const satisfies { embed: ModelLabel };
@@ -29,6 +31,9 @@ export const DEFAULT_TASK_ACCESS: Record<string, string[]> = Object.fromEntries(
 );
 
 export const TRANSLATE_JOB_MODEL_LABEL = TASKS.translate.models[0]!;
+export const OCR_JOB_MODEL_LABEL = TASKS.ocr.models[0]!;
+export const OCR_SYSTEM_PROMPT =
+  "Use the task tabs above to run Text Recognition, Formula Recognition, or Table Recognition on the uploaded image.";
 
 export function isChatTaskType(value: string): value is ChatTaskType {
   return value in TASKS;
@@ -82,4 +87,7 @@ export function getPublicTaskCatalog(): {
 // ponytail: self-check   fails fast if MODELS/TASKS drift
 if (resolveBackendModel("chat", "OCT3Q") !== MODELS.OCT3Q.id) {
   throw new Error("taskCatalog self-check failed");
+}
+if (resolveBackendModel("ocr", "ocr") !== MODELS.ocr.id) {
+  throw new Error("taskCatalog ocr self-check failed");
 }

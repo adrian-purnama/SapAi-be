@@ -1,10 +1,13 @@
 import mongoose from "mongoose";
 
+import type { ApiKeyAuthContext } from "../types/authContext.js";
+import type { NormalizedChatJobCreateBody } from "../schemas/chatJobBody.js";
 import { UserModel } from "../models/User.js";
 import { ChatJobModel, CHAT_JOB_IN_FLIGHT_STATUSES } from "../models/ChatJob.js";
+import { DEFAULT_MAX_OCR_MB } from "../constants/chatLimits.js";
 import { getRateLimitPerMinuteForUserPlan } from "../auth/apiKeyRateLimit.js";
-import { resolveEffectivePlanForUser, type PlanSnapshot } from "../services/planRegistry.js";
-import { planToPublicSnapshot } from "../utils/planAccess.js";
+import { getPlanBySlugFromRegistry, resolveEffectivePlanForUser, type PlanSnapshot } from "../services/planRegistry.js";
+import { assertPlanAllowsTaskAndModel, planToPublicSnapshot } from "../utils/planAccess.js";
 
 export class PlanLimitError extends Error {
   readonly code: string;
@@ -76,6 +79,26 @@ export async function assertTranslateTextWithinPlanLimits(userId: string, text: 
   }
 }
 
+/** Enforces `Plan.maxOcrMb` on OCR `imageBase64` (decoded size estimate). */
+export async function assertOcrImageWithinPlanLimits(userId: string, imageBase64: string): Promise<void> {
+  const user = await UserModel.findById(userId).select("plan planExpiresAt").lean();
+  const plan = resolveEffectivePlanForUser({ plan: user?.plan, planExpiresAt: user?.planExpiresAt });
+  const maxOcrMb = plan?.maxOcrMb ?? DEFAULT_MAX_OCR_MB;
+  const trimmed = imageBase64.trim();
+  if (!trimmed) {
+    throw new PlanLimitError("imageBase64 cannot be empty.", "EMPTY_IMAGE");
+  }
+  const maxBytes = maxOcrMb * 1024 * 1024;
+  const approxDecodedBytes = Math.floor((trimmed.length * 3) / 4);
+  if (approxDecodedBytes > maxBytes) {
+    const givenMb = Math.max(1, Math.ceil(approxDecodedBytes / (1024 * 1024)));
+    throw new PlanLimitError(
+      `imageBase64 exceeds your plan limit of ${maxOcrMb} MB (approx ${givenMb} MB given).`,
+      "IMAGE_TOO_LARGE",
+    );
+  }
+}
+
 /** Enforces `Plan.maxCharacterPerMessage` on every message in `input` (chat + RAG). */
 export async function assertChatInputWithinPlanLimits(
   userId: string,
@@ -112,4 +135,19 @@ export async function assertChatInFlightWithinPlanLimits(userId: string): Promis
       "TOO_MANY_IN_FLIGHT_JOBS",
     );
   }
+}
+
+/** Plan-backed gate before job insert: task/model access, message length, in-flight cap. */
+export async function assertChatJobAllowedForCreate(
+  auth: ApiKeyAuthContext,
+  body: NormalizedChatJobCreateBody,
+): Promise<PlanSnapshot> {
+  const plan = getPlanBySlugFromRegistry(auth.plan);
+  if (!plan) {
+    throw new PlanLimitError("No subscription plan found.", "PLAN_NOT_FOUND");
+  }
+  assertPlanAllowsTaskAndModel(plan, body.taskType, body.model);
+  await assertChatInputWithinPlanLimits(auth.userId, body.input);
+  await assertChatInFlightWithinPlanLimits(auth.userId);
+  return plan;
 }

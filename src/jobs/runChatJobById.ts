@@ -21,7 +21,7 @@ type ChatJobRunnerContext = {
   jobObjectId: mongoose.Types.ObjectId;
 };
 
-type RunnerMessage = { role: string; content: string };
+type RunnerMessage = { role: string; content: string; images?: string[] };
 
 type CompletionOut = {
   text: string;
@@ -72,7 +72,14 @@ function runErrorMessage(err: unknown): string {
 }
 
 function mapJobInputToMessages(doc: ChatJobDocument): RunnerMessage[] {
-  return doc.input.map((m) => ({ role: m.role, content: m.content }));
+  return doc.input.map((m) => {
+    const msg: RunnerMessage = { role: m.role, content: m.content };
+    const images = (m as { images?: string[] }).images;
+    if (Array.isArray(images) && images.length > 0) {
+      msg.images = images;
+    }
+    return msg;
+  });
 }
 
 function resolveJobBackendModel(doc: ChatJobDocument): string {
@@ -546,6 +553,26 @@ async function runTranslateTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
   await persistCompletedFull(jobObjectId, { ...out, useDeepSeek: false }, logPrefix);
 }
 
+async function runOcrTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
+  const { doc, jobObjectId } = ctx;
+  const logPrefix = "[runOcrTaskJob]";
+
+  const messages = mapJobInputToMessages(doc);
+  const resolvedModelId = resolveJobBackendModel(doc);
+  const { baseUrl, temperature, think } = readOllamaEnv();
+
+  const out = await callOllamaChat({
+    baseUrl,
+    model: resolvedModelId,
+    messages,
+    temperature,
+    maxTokens: doc.maxTokens ?? 500,
+    think,
+  });
+
+  await persistCompletedFull(jobObjectId, { ...out, useDeepSeek: false }, logPrefix);
+}
+
 /**
  * Executes a single job by id. Used by the queue runner after `claimNextChatJob`,
  * or call directly to run a pending job without waiting for the queue (e.g. admin / paid inline).
@@ -599,6 +626,9 @@ export async function runChatJobById(jobId: string): Promise<void> {
         break;
       case "translate":
         await runTranslateTaskJob(ctx);
+        break;
+      case "ocr":
+        await runOcrTaskJob(ctx);
         break;
       default:
         throw new Error(`Unsupported task type: ${String(doc.taskType)}`);

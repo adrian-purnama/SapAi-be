@@ -6,7 +6,7 @@
  * @see https://github.com/ollama/ollama/blob/main/docs/api.md
  */
 
-export type OllamaChatMessage = { role: string; content: string };
+export type OllamaChatMessage = { role: string; content: string; images?: string[] };
 
 export type CallOllamaChatParams = {
   baseUrl: string;

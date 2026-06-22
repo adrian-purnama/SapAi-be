@@ -27,7 +27,7 @@ export type AdminChatJob = {
   model: string;
   maxTokens: number;
   useDeepSeek: boolean | null;
-  input: Array<{ role: string; content: string }>;
+  input: Array<{ role: string; content: string; images?: string[] }>;
   result: AdminChatJobResult;
   ragAnalysis: AdminChatJobRagAnalysis;
   error: { message: string | null; code: string | null } | null;
@@ -65,7 +65,7 @@ type JobDocLike = {
   model: string;
   maxTokens?: number | null;
   useDeepSeek?: boolean | null;
-  input?: Array<{ role?: string; content?: string }> | null;
+  input?: Array<{ role?: string; content?: string; images?: string[] | null }> | null;
   ragAnalysis?: RagAnalysisLike;
   result?: {
     text?: string | null;
@@ -116,10 +116,17 @@ function mapError(e: JobDocLike["error"]): AdminChatJob["error"] {
 
 function mapInput(input: JobDocLike["input"]): AdminChatJob["input"] {
   if (!Array.isArray(input)) return [];
-  return input.map((m) => ({
-    role: String(m.role ?? ""),
-    content: String(m.content ?? ""),
-  }));
+  return input.map((m) => {
+    const row: AdminChatJob["input"][number] = {
+      role: String(m.role ?? ""),
+      content: String(m.content ?? ""),
+    };
+    if (Array.isArray(m.images) && m.images.length > 0) {
+      const chars = m.images.reduce((n, img) => n + String(img).length, 0);
+      row.images = [`[${m.images.length} image(s), ${chars} base64 chars omitted]`];
+    }
+    return row;
+  });
 }
 
 export function toAdminChatJob(doc: JobDocLike, userEmail: string | null = null): AdminChatJob {

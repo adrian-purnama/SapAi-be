@@ -8,10 +8,15 @@ import {
 import {
   CHAT_TASK_TYPES,
   modelLabelsForTask,
+  OCR_JOB_MODEL_LABEL,
+  OCR_SYSTEM_PROMPT,
   TRANSLATE_JOB_MODEL_LABEL,
 } from "../constants/taskCatalog.js";
 import { buildTranslatePrompt } from "../utils/buildTranslatePrompt.js";
-import { assertTranslateTextWithinPlanLimits } from "../utils/planChatLimits.js";
+import {
+  assertOcrImageWithinPlanLimits,
+  assertTranslateTextWithinPlanLimits,
+} from "../utils/planChatLimits.js";
 
 export { CHAT_TASK_TYPES };
 
@@ -62,10 +67,18 @@ const translateBodySchema = z.object({
   maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
 });
 
+const ocrBodySchema = z.object({
+  taskType: z.literal("ocr"),
+  imageBase64: z.string().min(1, "imageBase64 is required"),
+  mode: z.enum(["text", "formula", "table"]).optional().default("text"),
+  maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
+});
+
 export const chatJobCreateBodySchema = z.discriminatedUnion("taskType", [
   chatBodySchema,
   ragBodySchema,
   translateBodySchema,
+  ocrBodySchema,
 ]);
 
 export type ChatJobCreateBodyParsed = z.infer<typeof chatJobCreateBodySchema>;
@@ -73,12 +86,27 @@ export type ChatJobCreateBodyParsed = z.infer<typeof chatJobCreateBodySchema>;
 export type NormalizedChatJobCreateBody = {
   taskType: string;
   model: string;
-  input: { role: "system" | "user" | "assistant" | "tool"; content: string }[];
+  input: {
+    role: "system" | "user" | "assistant" | "tool";
+    content: string;
+    images?: string[];
+  }[];
   maxTokens?: number;
 };
 
 /** @deprecated Use NormalizedChatJobCreateBody after normalizeChatJobCreateBody */
 export type ChatJobCreateBody = NormalizedChatJobCreateBody;
+
+const OCR_MODE_LABELS: Record<"text" | "formula" | "table", string> = {
+  text: "Text Recognition",
+  formula: "Formula Recognition",
+  table: "Table Recognition",
+};
+
+/** Strip `data:image/...;base64,` prefix; Ollama expects raw base64. */
+export function stripDataUrlBase64(value: string): string {
+  return value.replace(/^data:image\/[^;]+;base64,/, "").trim();
+}
 
 export async function normalizeChatJobCreateBody(
   parsed: ChatJobCreateBodyParsed,
@@ -99,6 +127,24 @@ export async function normalizeChatJobCreateBody(
             targetCode: parsed.targetCode,
             text: parsed.text,
           }),
+        },
+      ],
+      maxTokens: parsed.maxTokens,
+    };
+  }
+
+  if (parsed.taskType === "ocr") {
+    const imageBase64 = stripDataUrlBase64(parsed.imageBase64);
+    await assertOcrImageWithinPlanLimits(userId, imageBase64);
+    return {
+      taskType: "ocr",
+      model: OCR_JOB_MODEL_LABEL,
+      input: [
+        { role: "system", content: OCR_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: OCR_MODE_LABELS[parsed.mode],
+          images: [imageBase64],
         },
       ],
       maxTokens: parsed.maxTokens,

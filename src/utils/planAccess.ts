@@ -15,6 +15,7 @@ export type PlanPublicSnapshot = {
   maxChatInFlight: number;
   maxPdfUpload: number;
   maxPdfMb: number;
+  maxOcrMb: number;
 };
 
 export function planToPublicSnapshot(plan: PlanSnapshot): PlanPublicSnapshot {
@@ -30,6 +31,7 @@ export function planToPublicSnapshot(plan: PlanSnapshot): PlanPublicSnapshot {
     maxChatInFlight: plan.maxChatInFlight,
     maxPdfUpload: plan.maxPdfUpload,
     maxPdfMb: plan.maxPdfMb,
+    maxOcrMb: plan.maxOcrMb,
   };
 }
 

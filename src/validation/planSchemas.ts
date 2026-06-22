@@ -52,6 +52,7 @@ export const planCreateBodySchema = z.object({
   maxApiKeys: z.number().int().min(0),
   maxPdfUpload: z.number().int().min(0),
   maxPdfMb: z.number().int().min(1).max(512),
+  maxOcrMb: z.number().int().min(1).max(512),
   analyticsRetentionDays: z.number().int().min(0).max(3650),
   isAutoEmbed: z.boolean().optional().default(false),
   embedBadgeCustomizable: z.boolean().optional().default(false),

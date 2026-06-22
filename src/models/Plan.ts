@@ -42,6 +42,8 @@ const planSchema = new mongoose.Schema(
     maxPdfUpload: { type: Number, required: true, min: 0 },
     /** Max size per PDF file, in megabytes. */
     maxPdfMb: { type: Number, required: true, min: 1, max: 512 },
+    /** Max decoded OCR image size per request, in megabytes. */
+    maxOcrMb: { type: Number, required: true, min: 1, max: 512, default: 10 },
 
     /** How far back (calendar days) the plan may view dashboard / RAG analytics. `0` = today (UTC) only. */
     analyticsRetentionDays: { type: Number, required: true, min: 0, max: 3650 },
@@ -55,7 +57,7 @@ const planSchema = new mongoose.Schema(
     priceLabel: { type: String, default: null, trim: true, maxlength: 64 },
     priceNote: { type: String, default: null, trim: true, maxlength: 64 },
 
-    /** Per-task allowed public model labels (keys = task types from task catalog). */
+    /** Per-task allowed public model labels (keys from task catalog: chat, rag, translate, ocr). */
     taskAccess: {
       type: mongoose.Schema.Types.Mixed,
       default: () => ({ ...DEFAULT_TASK_ACCESS }),

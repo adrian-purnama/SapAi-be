@@ -24,6 +24,7 @@ const chatMessageSchema = new mongoose.Schema(
       required: true,
     },
     content: { type: String, required: true },
+    images: { type: [String], default: undefined },
   },
   { _id: false },
 );

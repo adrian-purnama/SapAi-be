@@ -18,6 +18,7 @@ export type PlanSnapshot = {
   maxApiKeys: number;
   maxPdfUpload: number;
   maxPdfMb: number;
+  maxOcrMb: number;
   analyticsRetentionDays: number;
   isAutoEmbed: boolean;
   embedBadgeCustomizable: boolean;
@@ -72,6 +73,7 @@ export function planDocToSnapshot(doc: PlanDoc): PlanSnapshot {
     maxApiKeys: Number(doc.maxApiKeys),
     maxPdfUpload: Number(doc.maxPdfUpload),
     maxPdfMb: Number(doc.maxPdfMb),
+    maxOcrMb: Number((doc as { maxOcrMb?: number }).maxOcrMb ?? 10),
     analyticsRetentionDays: Number(
       doc.analyticsRetentionDays ?? (doc as { retentionDays?: number }).retentionDays ?? 0,
     ),

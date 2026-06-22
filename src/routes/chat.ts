@@ -11,6 +11,7 @@ import {
   chatJobCreateBodySchema,
   normalizeChatJobCreateBody,
 } from "../schemas/chatJobBody.js";
+import { MAX_PLAN_OCR_MB, ocrJsonBodyLimitBytes } from "../constants/chatLimits.js";
 import { createAndQueueChatJob } from "../services/createChatJobFromAuth.js";
 import {
   getDefaultPlanFromRegistry,
@@ -50,7 +51,10 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
     sendSuccess(reply, [...CHAT_JOB_STATUS_VALUES]),
   );
 
-  fastify.post("/api/v1/chat", { preHandler: requireApiKey }, async (request, reply) => {
+  fastify.post(
+    "/api/v1/chat",
+    { preHandler: requireApiKey, bodyLimit: ocrJsonBodyLimitBytes(MAX_PLAN_OCR_MB) },
+    async (request, reply) => {
     const parsed = chatJobCreateBodySchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       return sendError(reply, "Invalid body", 400, "VALIDATION_ERROR", {
@@ -66,7 +70,7 @@ export async function registerChatRoutes(fastify: FastifyInstance): Promise<void
       const body = await normalizeChatJobCreateBody(raw, auth.userId);
 
       let jobInput = body.input;
-      if (raw.taskType !== "translate") {
+      if (raw.taskType !== "translate" && raw.taskType !== "ocr") {
         const template = raw.outputJsonTemplate?.trim();
         if (template && template.length > 0) {
           jobInput = [

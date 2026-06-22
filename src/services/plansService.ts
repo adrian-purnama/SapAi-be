@@ -65,6 +65,7 @@ export async function createPlan(input: PlanCreateBody): Promise<PlanSnapshot> {
     maxApiKeys: input.maxApiKeys,
     maxPdfUpload: input.maxPdfUpload,
     maxPdfMb: input.maxPdfMb,
+    maxOcrMb: input.maxOcrMb,
     analyticsRetentionDays: input.analyticsRetentionDays,
     isAutoEmbed: input.isAutoEmbed ?? false,
     embedBadgeCustomizable: input.embedBadgeCustomizable ?? false,
@@ -99,6 +100,7 @@ export async function updatePlan(id: string, input: PlanPatchBody): Promise<Plan
   if (input.maxApiKeys !== undefined) doc.maxApiKeys = input.maxApiKeys;
   if (input.maxPdfUpload !== undefined) doc.maxPdfUpload = input.maxPdfUpload;
   if (input.maxPdfMb !== undefined) doc.maxPdfMb = input.maxPdfMb;
+  if (input.maxOcrMb !== undefined) doc.maxOcrMb = input.maxOcrMb;
   if (input.analyticsRetentionDays !== undefined) {
     doc.analyticsRetentionDays = input.analyticsRetentionDays;
   }
