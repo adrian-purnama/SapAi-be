@@ -314,27 +314,36 @@ async function retrieveRagHits(
   baseUrl: string,
 ): Promise<FaqChunkHit[]> {
   const embedModel = resolveEmbedBackendModel();
-  console.log(`[RAG dev] embedding model: fetching BM25 and dense`);
-  const [denseHits, bm25Hits] = await Promise.all([
-    (async (): Promise<FaqChunkHit[]> => {
-      const emb = await callOllamaEmbed({ baseUrl, model: embedModel, input: question });
-      const qvec = emb.embeddings?.[0];
-      if (!Array.isArray(qvec) || qvec.length === 0) return [];
-      return searchFaqChunks({
+  let denseHits: FaqChunkHit[] = [];
+  let bm25Hits: FaqChunkHit[] = [];
+
+  try {
+    const emb = await callOllamaEmbed({ baseUrl, model: embedModel, input: question });
+    const qvec = emb.embeddings?.[0];
+    if (Array.isArray(qvec) && qvec.length > 0) {
+      denseHits = await searchFaqChunks({
         apiKeyId,
         vector: qvec,
         limit: RAG_RETRIEVAL_POOL,
       });
-    })(),
-    searchFaqChunksText({
+    }
+  } catch (e) {
+    console.warn("[RAG] dense retrieval failed:", e);
+  }
+
+  try {
+    bm25Hits = await searchFaqChunksText({
       apiKeyId,
       query: question,
       limit: RAG_RETRIEVAL_POOL,
-    }),
-  ]);
+    });
+  } catch (e) {
+    console.warn("[RAG] BM25 retrieval failed:", e);
+  }
 
-  console.log(`[RAG dev] embedding model: merging BM25 and dense`);
-  return mergeRagRetrievalHits(denseHits, bm25Hits);
+  const merged = mergeRagRetrievalHits(denseHits, bm25Hits);
+  console.log(`[RAG] dense=${denseHits.length} bm25=${bm25Hits.length} merged=${merged.length}`);
+  return merged;
 }
 
 function injectRagContext(messages: RunnerMessage[], hits: FaqChunkHit[]): void {
@@ -344,18 +353,13 @@ function injectRagContext(messages: RunnerMessage[], hits: FaqChunkHit[]): void 
     .map((h, i) => `[#${i + 1} score=${h.score.toFixed(3)}]\n${h.text}`)
     .join("\n\n---\n\n");
 
-  console.log(context);
-
-  messages.unshift({
+  const userIdx = lastUserMessageIndex(messages);
+  messages.splice(userIdx, 0, {
     role: "system",
     content:
-      "You are a helpful assistant. Answer short, clear, and helpful. " +
-      "Use provided FAQ context when relevant. If the context does not contain the answer, say you don't know.",
-  });
-
-  messages.splice(lastUserMessageIndex(messages) + 1, 0, {
-    role: "system",
-    content: `FAQ context:\n\n${context}`,
+      "You are a helpful FAQ assistant. Answer short, clear, and helpful using the FAQ context below when relevant. " +
+      "If the context does not contain the answer, say you don't know.\n\n" +
+      `FAQ context:\n\n${context}`,
   });
 }
 
@@ -500,14 +504,12 @@ async function runRagTaskJob(ctx: ChatJobRunnerContext): Promise<void> {
   let ragRetrievalHits: FaqChunkHit[] = [];
 
   if (ragQuestion) {
-    try {
-      const hits = await retrieveRagHits(String(doc.apiKeyId), ragQuestion, baseUrl);
-      if (hits.length > 0) {
-        ragRetrievalHits = hits;
-        injectRagContext(messages, hits);
-      }
-    } catch (e) {
-      console.log("[RAG dev] retrieval error:", e);
+    const hits = await retrieveRagHits(String(doc.apiKeyId), ragQuestion, baseUrl);
+    if (hits.length > 0) {
+      ragRetrievalHits = hits;
+      injectRagContext(messages, hits);
+    } else {
+      console.warn(`[RAG] no FAQ chunks retrieved for apiKeyId=${String(doc.apiKeyId)}`);
     }
   }
 

@@ -1,4 +1,5 @@
 import { getQdrantContext } from "./client.js";
+import { ensureFaqChunkSearchIndexes } from "../services/qdrantFaqChunksService.js";
 
 export type SearchFaqChunksParams = {
   apiKeyId: string;
@@ -16,6 +17,8 @@ export type FaqChunkHit = {
 export async function searchFaqChunks(params: SearchFaqChunksParams): Promise<FaqChunkHit[]> {
   const ctx = getQdrantContext();
   if (!ctx) return [];
+
+  await ensureFaqChunkSearchIndexes(ctx.client, ctx.collection);
 
   const limit = Math.min(Math.max(params.limit ?? 5, 1), 20);
   const res = await ctx.client.search(ctx.collection, {

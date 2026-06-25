@@ -121,6 +121,15 @@ async function ensureApiKeyIdKeywordIndex(
   return ensurePayloadKeywordIndex(client, collection, "api_key_id");
 }
 
+/** Keyword indexes required for FAQ vector search filters. Idempotent. */
+export async function ensureFaqChunkSearchIndexes(
+  client: QdrantClient,
+  collection: string,
+): Promise<void> {
+  await ensureApiKeyIdKeywordIndex(client, collection);
+  await ensureFaqDocumentIdKeywordIndex(client, collection);
+}
+
 async function ensureCollection(client: QdrantClient, collection: string, vectorSize: number): Promise<void> {
   const { exists } = await client.collectionExists(collection);
   if (exists) {
@@ -143,6 +152,7 @@ async function ensureCollection(client: QdrantClient, collection: string, vector
         });
       }
     } else {
+      await ensureFaqChunkSearchIndexes(client, collection);
       return;
     }
   }
@@ -150,7 +160,7 @@ async function ensureCollection(client: QdrantClient, collection: string, vector
   await client.createCollection(collection, {
     vectors: { size: vectorSize, distance: "Cosine" },
   });
-  await ensureFaqDocumentIdKeywordIndex(client, collection);
+  await ensureFaqChunkSearchIndexes(client, collection);
 }
 
 export async function upsertFaqChunkVectors(
