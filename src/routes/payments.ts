@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import mongoose from "mongoose";
 import { z } from "zod";
@@ -8,7 +6,12 @@ import { requireBearerUser } from "../auth/requireBearerUser.js";
 import { PlanPaymentModel } from "../models/PlanPayment.js";
 import { getPlanBySlugFromRegistry } from "../services/planRegistry.js";
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
-import { createParameter, createTransaction } from "../utils/midtrans.js";
+import {
+  createParameter,
+  createTransaction,
+  getMidtransServerKey,
+  verifyMidtransNotificationSignature,
+} from "../utils/midtrans.js";
 import { toAbsoluteUrlFromRequest } from "../utils/publicOriginFromRequest.js";
 
 const planPaymentBodySchema = z.object({
@@ -21,23 +24,6 @@ function frontendAppUrl(): string {
 
 function paymentApiUrl(request: FastifyRequest, path: string): string {
   return toAbsoluteUrlFromRequest(request, path) ?? `http://localhost:${process.env.PORT ?? 8000}${path}`;
-}
-
-function verifyMidtransSignature(body: Record<string, unknown>): boolean {
-  const serverKey = process.env.MIDTRANS_SERVER_KEY?.trim();
-  if (!serverKey) return false;
-
-  const orderId = String(body.order_id ?? "");
-  const statusCode = String(body.status_code ?? "");
-  const grossAmount = String(body.gross_amount ?? "");
-  const signatureKey = String(body.signature_key ?? "");
-  if (!orderId || !signatureKey) return false;
-
-  const expected = crypto
-    .createHash("sha512")
-    .update(orderId + statusCode + grossAmount + serverKey)
-    .digest("hex");
-  return signatureKey === expected;
 }
 
 function isMidtransPaid(transactionStatus: string, fraudStatus: string): boolean {
@@ -69,7 +55,12 @@ export async function registerPaymentRoutes(fastify: FastifyInstance): Promise<v
   /** Midtrans Payment Notification URL (configure in Midtrans dashboard). */
   fastify.post("/api/v1/payments/midtrans/notification", async (request, reply) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
-    if (!verifyMidtransSignature(body)) {
+    if (!getMidtransServerKey()) {
+      request.log.error("MIDTRANS_SERVER_KEY is missing");
+      return sendError(reply, "Payment gateway not configured.", 503, "MIDTRANS_NOT_CONFIGURED");
+    }
+    if (!verifyMidtransNotificationSignature(body)) {
+      request.log.warn({ orderId: body.order_id }, "midtrans notification signature mismatch");
       return sendError(reply, "Invalid Midtrans signature.", 403, "INVALID_SIGNATURE");
     }
 
