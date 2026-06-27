@@ -25,6 +25,10 @@ export type PlanSnapshot = {
   ragAnalyticsEnabled: boolean;
   priceLabel: string | null;
   priceNote: string | null;
+  showOnPricingPage: boolean;
+  imageFileId: string | null;
+  accentColor: string | null;
+  midtrans: { grossAmount: number | null };
   taskAccess: Record<string, string[]>;
   createdAt: string | null;
   updatedAt: string | null;
@@ -57,6 +61,16 @@ function normalizeTaskAccessFromDoc(doc: PlanDoc): Record<string, string[]> {
   return Object.keys(out).length > 0 ? out : { ...DEFAULT_TASK_ACCESS };
 }
 
+function normalizeMidtransFromDoc(doc: PlanDoc): { grossAmount: number | null } {
+  const raw = (doc as { midtrans?: { grossAmount?: unknown } }).midtrans;
+  const n = raw?.grossAmount;
+  if (n == null || n === "") return { grossAmount: null };
+  const amount = Number(n);
+  return {
+    grossAmount: Number.isFinite(amount) && amount >= 0 ? Math.round(amount) : null,
+  };
+}
+
 export function planDocToSnapshot(doc: PlanDoc): PlanSnapshot {
   return {
     id: doc._id.toString(),
@@ -82,6 +96,11 @@ export function planDocToSnapshot(doc: PlanDoc): PlanSnapshot {
     ragAnalyticsEnabled: Boolean(doc.ragAnalyticsEnabled),
     priceLabel: doc.priceLabel != null ? String(doc.priceLabel) : null,
     priceNote: doc.priceNote != null ? String(doc.priceNote) : null,
+    showOnPricingPage: Boolean((doc as { showOnPricingPage?: boolean }).showOnPricingPage),
+    imageFileId:
+      (doc as { imageFileId?: string | null }).imageFileId?.trim() || null,
+    accentColor: (doc as { accentColor?: string | null }).accentColor?.trim() || null,
+    midtrans: normalizeMidtransFromDoc(doc),
     taskAccess: normalizeTaskAccessFromDoc(doc),
     createdAt: toIso(doc.createdAt),
     updatedAt: toIso(doc.updatedAt),

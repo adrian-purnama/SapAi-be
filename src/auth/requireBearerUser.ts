@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import mongoose from "mongoose";
 import { UserModel, type UserDocument } from "../models/User.js";
 import { verifyAuthToken, type AuthTokenPayload } from "../services/jwtService.js";
+import { applyExpiredPlanDowngradeIfNeeded } from "../services/userPlanExpiryService.js";
 import { sendError } from "../utils/apiResponse.js";
 
 declare module "fastify" {
@@ -56,7 +57,9 @@ export async function requireBearerUser(
     return;
   }
 
-  request.bearerUser = user;
+  await applyExpiredPlanDowngradeIfNeeded(user._id);
+  const freshUser = await UserModel.findById(user._id);
+  request.bearerUser = freshUser ?? user;
 }
 
 export async function requireBearerAdmin(

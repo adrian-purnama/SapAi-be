@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 import { PlanModel } from "../models/Plan.js";
 import { UserModel } from "../models/User.js";
+import { deletePublicFile, updatePublicFile } from "./publicFilesService.js";
 import {
   getPlanByIdFromRegistry,
   getPlansFromRegistry,
@@ -72,6 +73,11 @@ export async function createPlan(input: PlanCreateBody): Promise<PlanSnapshot> {
     ragAnalyticsEnabled: input.ragAnalyticsEnabled ?? false,
     priceLabel: normalizeOptionalPrice(input.priceLabel) ?? null,
     priceNote: normalizeOptionalPrice(input.priceNote) ?? null,
+    showOnPricingPage: input.showOnPricingPage ?? false,
+    accentColor: normalizeOptionalPrice(input.accentColor) ?? null,
+    midtrans: {
+      grossAmount: input.midtrans?.grossAmount ?? null,
+    },
     taskAccess: input.taskAccess,
   });
 
@@ -111,6 +117,15 @@ export async function updatePlan(id: string, input: PlanPatchBody): Promise<Plan
   if (input.ragAnalyticsEnabled !== undefined) doc.ragAnalyticsEnabled = input.ragAnalyticsEnabled;
   if (input.priceLabel !== undefined) doc.priceLabel = normalizeOptionalPrice(input.priceLabel);
   if (input.priceNote !== undefined) doc.priceNote = normalizeOptionalPrice(input.priceNote);
+  if (input.showOnPricingPage !== undefined) doc.showOnPricingPage = input.showOnPricingPage;
+  if (input.accentColor !== undefined) {
+    doc.accentColor = normalizeOptionalPrice(input.accentColor);
+  }
+  if (input.midtrans !== undefined) {
+    (doc as { midtrans?: { grossAmount?: number | null } }).midtrans = {
+      grossAmount: input.midtrans.grossAmount ?? null,
+    };
+  }
   if (input.taskAccess !== undefined) doc.taskAccess = input.taskAccess;
 
   if (input.isDefault === true) {
@@ -144,5 +159,47 @@ export async function deletePlan(id: string): Promise<void> {
   }
 
   await PlanModel.deleteOne({ _id: doc._id });
+  const imageFileId = (doc as { imageFileId?: string | null }).imageFileId?.trim();
+  if (imageFileId) {
+    await deletePublicFile(imageFileId).catch(() => undefined);
+  }
   await reloadPlanRegistry();
+}
+
+export async function setPlanImage(
+  id: string,
+  buffer: Buffer,
+  options: { originalFilename: string; contentType: string },
+): Promise<PlanSnapshot> {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error("Invalid plan id.");
+  }
+
+  const doc = await PlanModel.findById(id);
+  if (!doc) throw new Error("Plan not found.");
+
+  const previousId = (doc as { imageFileId?: string | null }).imageFileId?.trim() || null;
+  const uploaded = await updatePublicFile(previousId, buffer, options);
+  (doc as { imageFileId?: string | null }).imageFileId = uploaded.fileId;
+  await doc.save();
+  await reloadPlanRegistry();
+  return getPlanByIdFromRegistry(id) ?? planDocToSnapshot(doc);
+}
+
+export async function removePlanImage(id: string): Promise<PlanSnapshot> {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error("Invalid plan id.");
+  }
+
+  const doc = await PlanModel.findById(id);
+  if (!doc) throw new Error("Plan not found.");
+
+  const previousId = (doc as { imageFileId?: string | null }).imageFileId?.trim() || null;
+  (doc as { imageFileId?: string | null }).imageFileId = null;
+  await doc.save();
+  if (previousId) {
+    await deletePublicFile(previousId).catch(() => undefined);
+  }
+  await reloadPlanRegistry();
+  return getPlanByIdFromRegistry(id) ?? planDocToSnapshot(doc);
 }

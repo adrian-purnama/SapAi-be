@@ -59,6 +59,22 @@ export const planCreateBodySchema = z.object({
   ragAnalyticsEnabled: z.boolean().optional().default(false),
   priceLabel: z.string().trim().max(64).nullable().optional(),
   priceNote: z.string().trim().max(64).nullable().optional(),
+  showOnPricingPage: z.boolean().optional().default(false),
+  accentColor: z
+    .union([
+      z
+        .string()
+        .trim()
+        .regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/, "accentColor must be a hex color."),
+      z.literal("").transform(() => null),
+      z.null(),
+    ])
+    .optional(),
+  midtrans: z
+    .object({
+      grossAmount: z.union([z.number().int().min(0), z.null()]).optional(),
+    })
+    .optional(),
   taskAccess: taskAccessSchema.optional().default(() =>
     Object.fromEntries(CHAT_TASK_TYPES.map((t) => [t, modelLabelsForTask(t)])),
   ),

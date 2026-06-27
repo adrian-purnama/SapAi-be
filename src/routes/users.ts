@@ -18,6 +18,8 @@ import {
   resolveEffectivePlanForUser,
   resolvePlanForUser,
 } from "../services/planRegistry.js";
+import { listUserPlanHistory, recordAdminPlanAssignment } from "../services/userPlanHistoryService.js";
+import { applyExpiredPlanDowngradeIfNeeded } from "../services/userPlanExpiryService.js";
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
 import { getPlanTaskAccessView, parsePlanExpiresAtInput, planToPublicSnapshot } from "../utils/planAccess.js";
 
@@ -193,6 +195,8 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
     const id = params.data.id;
     if (!mongoose.Types.ObjectId.isValid(id)) return sendError(reply, "Invalid user id.", 400, "INVALID_USER_ID");
 
+    await applyExpiredPlanDowngradeIfNeeded(id);
+
     const user = await UserModel.findById(id)
       .populate(USER_PLAN_POPULATE)
       .select({
@@ -208,7 +212,8 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
       .lean();
     if (!user) return sendError(reply, "User not found.", 404, "USER_NOT_FOUND");
 
-    return sendSuccess(reply, { user: mapAdminUser(user) });
+    const planHistory = await listUserPlanHistory(id);
+    return sendSuccess(reply, { user: mapAdminUser(user), planHistory });
   });
 
   fastify.patch("/api/v1/admin/users/:id", { preHandler: requireBearerAdmin }, async (request, reply) => {
@@ -281,10 +286,26 @@ export async function registerUserRoutes(fastify: FastifyInstance): Promise<void
       return sendError(reply, "No changes provided.", 400, "INVALID_BODY");
     }
 
+    const planChanged = body.data.planId !== undefined || body.data.planExpiresAt !== undefined;
+    const adminId = (request as { bearerUser?: { _id: mongoose.Types.ObjectId } }).bearerUser?._id;
+
     const user = await UserModel.findByIdAndUpdate(id, { $set: update }, { new: true })
       .populate(USER_PLAN_POPULATE)
       .lean();
     if (!user) return sendError(reply, "User not found.", 404, "USER_NOT_FOUND");
+
+    if (planChanged && adminId) {
+      const assigned = resolvePlanForUser(user.plan);
+      if (assigned) {
+        await recordAdminPlanAssignment({
+          userId: id,
+          planSlug: assigned.slug,
+          planName: assigned.name,
+          planExpiresAt: user.planExpiresAt instanceof Date ? user.planExpiresAt : user.planExpiresAt ? new Date(user.planExpiresAt) : null,
+          adminUserId: adminId,
+        });
+      }
+    }
 
     let apiKeySync: Awaited<ReturnType<typeof syncUserApiKeysToPlan>> | undefined;
     if (needsApiKeySync) {

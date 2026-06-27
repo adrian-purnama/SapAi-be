@@ -6,6 +6,7 @@ import { getRateLimitPerMinuteForUserPlan, tryConsumeApiKeyRateSlot } from "./ap
 import { ApiKeyModel } from "../models/ApiKey.js";
 import { UserModel } from "../models/User.js";
 import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
+import { applyExpiredPlanDowngradeIfNeeded } from "../services/userPlanExpiryService.js";
 import { sha256Hex } from "../utils/sha256.js";
 
 export function headerString(h: string | string[] | undefined): string | undefined {
@@ -107,8 +108,12 @@ export async function authenticatePlainApiKey(
     };
   }
 
+  await applyExpiredPlanDowngradeIfNeeded(user._id);
+  const freshUser =
+    (await UserModel.findById(apiKey.userId).select("plan planExpiresAt email isAdmin isBlocked")) ?? user;
+
   // 7. Rate limit per API key, cap derived from the user's plan.
-  const planCtx = { plan: user.plan, planExpiresAt: user.planExpiresAt };
+  const planCtx = { plan: freshUser.plan, planExpiresAt: freshUser.planExpiresAt };
   const perMinute = getRateLimitPerMinuteForUserPlan(planCtx);
   if (!(await tryConsumeApiKeyRateSlot(apiKey._id.toString(), perMinute))) {
     return {
@@ -147,8 +152,8 @@ export async function authenticatePlainApiKey(
     plan: resolveEffectivePlanForUser(planCtx)?.slug ?? "unknown",
     label: apiKey.label,
     prefix: apiKey.prefix,
-    email: user.email,
-    isAdmin: Boolean(user.isAdmin),
+    email: freshUser.email,
+    isAdmin: Boolean(freshUser.isAdmin),
   };
   return { ok: true, ctx };
 }

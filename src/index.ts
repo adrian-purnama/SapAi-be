@@ -21,6 +21,7 @@ import { registerFilesRoutes } from "./routes/files.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerUserRoutes } from "./routes/users.js";
 import { registerPlanRoutes } from "./routes/plans.js";
+import { registerPaymentRoutes } from "./routes/payments.js";
 import { registerAdminApiKeyRoutes } from "./routes/adminApiKeys.js";
 import { registerAdminChatJobRoutes } from "./routes/adminChatJobs.js";
 import { resolveOllamaEmbedModel } from "./ollama/callOllamaEmbed.js";
@@ -114,6 +115,7 @@ async function main(): Promise<void> {
   await registerFilesRoutes(fastify);
   await registerUserRoutes(fastify);
   await registerPlanRoutes(fastify);
+  await registerPaymentRoutes(fastify);
   await registerAdminApiKeyRoutes(fastify);
   await registerAdminChatJobRoutes(fastify);
   await registerEmbedRoutes(fastify);

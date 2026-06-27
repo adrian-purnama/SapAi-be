@@ -57,6 +57,25 @@ const planSchema = new mongoose.Schema(
     priceLabel: { type: String, default: null, trim: true, maxlength: 64 },
     priceNote: { type: String, default: null, trim: true, maxlength: 64 },
 
+    /** When true, plan appears on the public `/pricing` page. */
+    showOnPricingPage: { type: Boolean, default: false },
+    /** GridFS public file id for pricing card image (`publicFiles` bucket). */
+    imageFileId: { type: String, default: null, trim: true },
+    /** Hex accent for pricing card border/CTA (e.g. `#7c3aed`). */
+    accentColor: { type: String, default: null, trim: true, maxlength: 9 },
+
+    /** Midtrans Snap/charge settings for this plan. */
+    midtrans: {
+      type: new mongoose.Schema(
+        {
+          /** Whole IDR amount for Midtrans `gross_amount` (e.g. 150000). null = not payable. */
+          grossAmount: { type: Number, default: null, min: 0 },
+        },
+        { _id: false },
+      ),
+      default: () => ({ grossAmount: null }),
+    },
+
     /** Per-task allowed public model labels (keys from task catalog: chat, rag, translate, ocr). */
     taskAccess: {
       type: mongoose.Schema.Types.Mixed,
@@ -68,6 +87,7 @@ const planSchema = new mongoose.Schema(
 
 planSchema.index({ isActive: 1, sortOrder: 1 });
 planSchema.index({ isDefault: 1 });
+planSchema.index({ showOnPricingPage: 1, isActive: 1, sortOrder: 1 });
 
 export type PlanLean = InferSchemaType<typeof planSchema>;
 export type PlanDocument = HydratedDocument<PlanLean>;

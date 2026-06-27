@@ -9,6 +9,7 @@ import { findFaqConstantByEmbedToken } from "../utils/embedTokenLookup.js";
 import { UserModel } from "../models/User.js";
 import type { ApiKeyAuthContext } from "../types/authContext.js";
 import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
+import { applyExpiredPlanDowngradeIfNeeded } from "../services/userPlanExpiryService.js";
 import { sha256Hex } from "../utils/sha256.js";
 
 function allowlistAllowsAll(allowlist: string[]): boolean {
@@ -87,8 +88,12 @@ export async function authenticatePlainEmbedToken(
     };
   }
 
+  await applyExpiredPlanDowngradeIfNeeded(user._id);
+  const freshUser =
+    (await UserModel.findById(apiKey.userId).select("plan planExpiresAt email isAdmin isBlocked")) ?? user;
+
   const rateKey = `embed:${sha256Hex(token)}`;
-  const planCtx = { plan: user.plan, planExpiresAt: user.planExpiresAt };
+  const planCtx = { plan: freshUser.plan, planExpiresAt: freshUser.planExpiresAt };
   const perMinute = getRateLimitPerMinuteForUserPlan(planCtx);
   if (!(await tryConsumeApiKeyRateSlot(rateKey, perMinute))) {
     return {
