@@ -2,7 +2,8 @@ import midtransClient from "midtrans-client";
 
 const snap = new midtransClient.Snap({
   isProduction: process.env.NODE_ENV !== "development",
-  serverKey: process.env.MIDTRANS_SERVER_KEY,
+  serverKey: process.env.MIDTRANS_SERVER_KEY ?? "",
+  clientKey: process.env.MIDTRANS_CLIENT_KEY ?? "",
 });
 
 export function createParameter(transaction: any) {

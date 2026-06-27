@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/midtrans-client": "^1.4.0",
     "@types/node": "^22.10.5",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
