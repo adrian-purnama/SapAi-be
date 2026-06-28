@@ -28,12 +28,19 @@ function serializeAuthUser(user: {
   plan?: unknown;
   planExpiresAt?: Date | null;
 }) {
+  const planExpiresAt =
+    user.planExpiresAt instanceof Date
+      ? user.planExpiresAt.toISOString()
+      : user.planExpiresAt
+        ? new Date(user.planExpiresAt).toISOString()
+        : null;
   return {
     id: user._id.toString(),
     email: user.email,
     isAdmin: Boolean(user.isAdmin),
     isEmailVerified: Boolean(user.isEmailVerified),
     plan: resolvePlanPublicForUser({ plan: user.plan, planExpiresAt: user.planExpiresAt }),
+    planExpiresAt: planExpiresAt && !Number.isNaN(new Date(planExpiresAt).getTime()) ? planExpiresAt : null,
   };
 }
 

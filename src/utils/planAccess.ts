@@ -6,6 +6,7 @@ import { PlanLimitError } from "./planChatLimits.js";
 export type PlanPublicSnapshot = {
   slug: string;
   name: string;
+  accentColor: string | null;
   analyticsRetentionDays: number;
   ragAnalyticsEnabled: boolean;
   isAutoEmbed: boolean;
@@ -22,6 +23,7 @@ export function planToPublicSnapshot(plan: PlanSnapshot): PlanPublicSnapshot {
   return {
     slug: plan.slug,
     name: plan.name,
+    accentColor: plan.accentColor?.trim() || null,
     analyticsRetentionDays: plan.analyticsRetentionDays,
     ragAnalyticsEnabled: plan.ragAnalyticsEnabled,
     isAutoEmbed: plan.isAutoEmbed,

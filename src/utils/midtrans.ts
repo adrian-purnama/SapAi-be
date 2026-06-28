@@ -55,16 +55,28 @@ export function createParameter(transaction: {
   order_id: string;
   gross_amount: number;
   email: string;
+  planSlug: string;
+  description: string;
 }) {
+  const itemName = transaction.description.slice(0, 50);
   return {
     transaction_details: {
       order_id: transaction.order_id,
       gross_amount: transaction.gross_amount,
     },
+    item_details: [
+      {
+        id: transaction.planSlug,
+        price: transaction.gross_amount,
+        quantity: 1,
+        name: itemName,
+      },
+    ],
     credit_card: { secure: true },
     customer_details: {
       email: transaction.email,
     },
+    custom_field1: transaction.description.slice(0, 255),
   };
 }
 

@@ -234,6 +234,8 @@ async function handleDeleteApiKey(request: FastifyRequest, reply: FastifyReply) 
     await session.endSession();
   }
 
+  await syncUserApiKeysToPlan(user._id);
+
   const qr = await deleteFaqChunkPointsByApiKeyFromQdrant(id);
   if (!qr.skipped && !qr.ok) {
     return sendError(
