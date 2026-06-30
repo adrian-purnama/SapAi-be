@@ -69,6 +69,7 @@ export async function assertTranslateTextWithinPlanLimits(userId: string, text: 
   if (content.length > maxCharacterPerMessage) {
     throw new LimitError(
       `text exceeds your plan limit of ${maxCharacterPerMessage} characters (${content.length} given).`,
+      "MESSAGE_TOO_LONG",
     );
   }
 }
@@ -107,6 +108,7 @@ export async function assertChatInputWithinPlanLimits(
     if (content.length > maxCharacterPerMessage) {
       throw new LimitError(
         `Message ${i + 1} exceeds your plan limit of ${maxCharacterPerMessage} characters (${content.length} given).`,
+        "MESSAGE_TOO_LONG",
       );
     }
   }
