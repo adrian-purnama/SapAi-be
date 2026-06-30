@@ -4,7 +4,6 @@ import { FaqConstantModel } from "../models/faqConstant.js";
 import { loadOrCreateDoc } from "./faqConstantsCore.js";
 
 export * from "./faqEmbedSettings.js";
-export * from "./faqBranding.js";
 
 function norm(s: string): string {
   return s.trim();

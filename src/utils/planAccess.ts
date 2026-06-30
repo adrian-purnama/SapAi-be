@@ -1,7 +1,7 @@
 import type { PlanSnapshot, UserPlanContext } from "../services/planRegistry.js";
 import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
 import { isChatTaskType } from "../constants/taskCatalog.js";
-import { PlanLimitError } from "./planChatLimits.js";
+import { LimitError } from "./limitError.js";
 
 export type PlanPublicSnapshot = {
   slug: string;
@@ -9,6 +9,7 @@ export type PlanPublicSnapshot = {
   accentColor: string | null;
   analyticsRetentionDays: number;
   ragAnalyticsEnabled: boolean;
+  allowMcp: boolean;
   isAutoEmbed: boolean;
   isPriority: boolean;
   rateLimitPerMinute: number;
@@ -26,6 +27,7 @@ export function planToPublicSnapshot(plan: PlanSnapshot): PlanPublicSnapshot {
     accentColor: plan.accentColor?.trim() || null,
     analyticsRetentionDays: plan.analyticsRetentionDays,
     ragAnalyticsEnabled: plan.ragAnalyticsEnabled,
+    allowMcp: plan.allowMcp,
     isAutoEmbed: plan.isAutoEmbed,
     isPriority: plan.isPriority,
     rateLimitPerMinute: plan.rateLimitPerMinute,
@@ -72,16 +74,16 @@ export function assertPlanAllowsTaskAndModel(
   const access = normalizePlanTaskAccess(plan);
   const allowedModels = access[taskType];
   if (!allowedModels) {
-    throw new PlanLimitError(
+    throw new LimitError(
       `Task type "${taskType}" is not included in your subscription plan.`,
       "TASK_NOT_ALLOWED",
     );
   }
   if (!isChatTaskType(taskType)) {
-    throw new PlanLimitError(`Unknown task type: ${taskType}`, "TASK_NOT_ALLOWED");
+    throw new LimitError(`Unknown task type: ${taskType}`, "TASK_NOT_ALLOWED");
   }
   if (!allowedModels.includes(modelLabel)) {
-    throw new PlanLimitError(
+    throw new LimitError(
       `Model "${modelLabel}" is not available for task "${taskType}" on your plan.`,
       "MODEL_NOT_ALLOWED",
     );

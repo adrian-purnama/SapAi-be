@@ -1,6 +1,6 @@
 import type { FastifyRequest } from "fastify";
 
-import { firstHeaderValue } from "./requestHeaders.js";
+import { firstHeader } from "./requestHeaders.js";
 
 /** Public site origin for absolute URLs (honors PUBLIC_BASE_URL, else forwarded Host). */
 export function getPublicOriginFromRequest(request: FastifyRequest): string | null {
@@ -8,12 +8,12 @@ export function getPublicOriginFromRequest(request: FastifyRequest): string | nu
   if (envBase) return envBase.replace(/\/$/, "");
 
   const proto =
-    firstHeaderValue(request.headers["x-forwarded-proto"])?.split(",")[0]?.trim() ||
+    firstHeader(request.headers["x-forwarded-proto"])?.split(",")[0]?.trim() ||
     (request.protocol as string | undefined) ||
     "http";
   const host =
-    firstHeaderValue(request.headers["x-forwarded-host"])?.split(",")[0]?.trim() ||
-    firstHeaderValue(request.headers.host)?.trim() ||
+    firstHeader(request.headers["x-forwarded-host"])?.split(",")[0]?.trim() ||
+    firstHeader(request.headers.host)?.trim() ||
     null;
   if (!host) return null;
   return `${proto}://${host}`;

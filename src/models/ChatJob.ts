@@ -68,6 +68,13 @@ const chatJobSchema = new mongoose.Schema(
     /** Plan slug at job creation (from plan registry). */
     plan: { type: String, required: true, trim: true, lowercase: true, maxlength: 32, index: true },
     apiKeyId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+    /** RAG multi-turn session (optional; rag jobs only). */
+    sessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ChatSession",
+      default: null,
+      index: true,
+    },
     taskType: { type: String, enum: CHAT_TASK_TYPES, required: true, index: true },
     status: {
       type: String,

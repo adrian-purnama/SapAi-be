@@ -1,6 +1,7 @@
 import type { Types } from "mongoose";
 
 import { lastUserMessageContent } from "./lastUserMessage.js";
+import { mapRagAnalysis, type RagAnalysisLike } from "./chatJobMappers.js";
 
 export type PublicRagAnalysis = {
   category: string | null;
@@ -33,12 +34,6 @@ export type PublicChatJobResponse = {
   updatedAt?: Date;
 };
 
-type RagAnalysisLike = {
-  category?: string | null;
-  answerable?: string | null;
-  intent?: string | null;
-} | null;
-
 type JobDocLike = {
   _id: Types.ObjectId;
   status: string;
@@ -61,15 +56,6 @@ type JobDocLike = {
   createdAt?: Date;
   updatedAt?: Date;
 };
-
-function mapRagAnalysis(ra: RagAnalysisLike): PublicRagAnalysis | null {
-  if (!ra || typeof ra !== "object") return null;
-  return {
-    category: ra.category ?? null,
-    answerable: ra.answerable ?? null,
-    intent: ra.intent ?? null,
-  };
-}
 
 export function toPublicChatJob(doc: JobDocLike): PublicChatJobResponse {
   const r = doc.result;

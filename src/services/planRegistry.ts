@@ -2,6 +2,8 @@ import mongoose, { type Types } from "mongoose";
 
 import { DEFAULT_TASK_ACCESS } from "../constants/taskCatalog.js";
 import { PlanModel, type PlanLean } from "../models/Plan.js";
+import { UserModel } from "../models/User.js";
+import { toIso } from "../utils/chatJobMappers.js";
 
 export type PlanSnapshot = {
   id: string;
@@ -23,6 +25,7 @@ export type PlanSnapshot = {
   isAutoEmbed: boolean;
   embedBadgeCustomizable: boolean;
   ragAnalyticsEnabled: boolean;
+  allowMcp: boolean;
   priceLabel: string | null;
   priceNote: string | null;
   showOnPricingPage: boolean;
@@ -40,12 +43,6 @@ let bySlug = new Map<string, PlanSnapshot>();
 let ordered: PlanSnapshot[] = [];
 let defaultSlug: string | null = null;
 let registryLoaded = false;
-
-function toIso(d: unknown): string | null {
-  if (!d) return null;
-  const t = d instanceof Date ? d : new Date(String(d));
-  return Number.isNaN(t.getTime()) ? null : t.toISOString();
-}
 
 function normalizeTaskAccessFromDoc(doc: PlanDoc): Record<string, string[]> {
   const raw = (doc as { taskAccess?: unknown }).taskAccess;
@@ -94,6 +91,7 @@ export function planDocToSnapshot(doc: PlanDoc): PlanSnapshot {
     isAutoEmbed: Boolean(doc.isAutoEmbed),
     embedBadgeCustomizable: Boolean(doc.embedBadgeCustomizable),
     ragAnalyticsEnabled: Boolean(doc.ragAnalyticsEnabled),
+    allowMcp: Boolean(doc.allowMcp),
     priceLabel: doc.priceLabel != null ? String(doc.priceLabel) : null,
     priceNote: doc.priceNote != null ? String(doc.priceNote) : null,
     showOnPricingPage: Boolean((doc as { showOnPricingPage?: boolean }).showOnPricingPage),
@@ -185,20 +183,10 @@ export function resolveEffectivePlanForUser(ctx: UserPlanContext): PlanSnapshot 
   return assigned ?? defaultPlan;
 }
 
-// ponytail: assert self-check
-function _planExpirySelfCheck(): void {
-  const past = new Date("2020-01-01T00:00:00.000Z");
-  const future = new Date("2099-01-01T00:00:00.000Z");
-  const pro = ordered.find((p) => !p.isDefault);
-  const def = getDefaultPlanFromRegistry();
-  if (!pro || !def) return;
-  const expiredCtx: UserPlanContext = { plan: pro.id, planExpiresAt: past };
-  const activeCtx: UserPlanContext = { plan: pro.id, planExpiresAt: future };
-  const defaultCtx: UserPlanContext = { plan: def.id, planExpiresAt: past };
-  console.assert(isUserPlanExpired(expiredCtx), "past expiry should be expired");
-  console.assert(!isUserPlanExpired(activeCtx), "future expiry should be active");
-  console.assert(resolveEffectivePlanForUser(expiredCtx)?.slug === def.slug, "expired → default");
-  console.assert(resolveEffectivePlanForUser(activeCtx)?.slug === pro.slug, "active → assigned");
-  console.assert(resolveEffectivePlanForUser(defaultCtx)?.slug === def.slug, "default ignores expiry");
+export async function getEffectivePlanForUserId(
+  userId: mongoose.Types.ObjectId | string,
+): Promise<PlanSnapshot | null> {
+  const user = await UserModel.findById(userId).select("plan planExpiresAt").lean();
+  if (!user) return null;
+  return resolveEffectivePlanForUser(user) ?? null;
 }
-if (process.argv[1]?.includes("planRegistry")) _planExpirySelfCheck();

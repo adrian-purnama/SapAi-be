@@ -6,23 +6,17 @@ import { UserModel } from "../models/User.js";
 import { ChatJobModel, CHAT_JOB_IN_FLIGHT_STATUSES } from "../models/ChatJob.js";
 import { DEFAULT_MAX_OCR_MB } from "../constants/chatLimits.js";
 import { getRateLimitPerMinuteForUserPlan } from "../auth/apiKeyRateLimit.js";
-import { getPlanBySlugFromRegistry, resolveEffectivePlanForUser, type PlanSnapshot } from "../services/planRegistry.js";
+import {
+  getEffectivePlanForUserId,
+  getPlanBySlugFromRegistry,
+  resolveEffectivePlanForUser,
+  type PlanSnapshot,
+} from "../services/planRegistry.js";
 import { assertPlanAllowsTaskAndModel, planToPublicSnapshot } from "../utils/planAccess.js";
+import { LimitError, limitErrorHttpStatus } from "./limitError.js";
 
-export class PlanLimitError extends Error {
-  readonly code: string;
-
-  constructor(message: string, code = "PROMPT_TOO_LONG") {
-    super(message);
-    this.name = "PlanLimitError";
-    this.code = code;
-  }
-}
-
-export function planLimitHttpStatus(code: string): number {
-  if (code === "TASK_NOT_ALLOWED" || code === "MODEL_NOT_ALLOWED") return 403;
-  return 400;
-}
+export { LimitError, limitErrorHttpStatus };
+export { LimitError as PlanLimitError, limitErrorHttpStatus as planLimitHttpStatus };
 
 export type PlanUsageLimits = {
   plan: {
@@ -70,10 +64,10 @@ export async function assertTranslateTextWithinPlanLimits(userId: string, text: 
   const { maxCharacterPerMessage } = await getPlanUsageLimitsForUser(userId);
   const content = text.trim();
   if (!content) {
-    throw new PlanLimitError("text cannot be empty.", "EMPTY_MESSAGE");
+    throw new LimitError("text cannot be empty.", "EMPTY_MESSAGE");
   }
   if (content.length > maxCharacterPerMessage) {
-    throw new PlanLimitError(
+    throw new LimitError(
       `text exceeds your plan limit of ${maxCharacterPerMessage} characters (${content.length} given).`,
     );
   }
@@ -81,18 +75,17 @@ export async function assertTranslateTextWithinPlanLimits(userId: string, text: 
 
 /** Enforces `Plan.maxOcrMb` on OCR `imageBase64` (decoded size estimate). */
 export async function assertOcrImageWithinPlanLimits(userId: string, imageBase64: string): Promise<void> {
-  const user = await UserModel.findById(userId).select("plan planExpiresAt").lean();
-  const plan = resolveEffectivePlanForUser({ plan: user?.plan, planExpiresAt: user?.planExpiresAt });
+  const plan = await getEffectivePlanForUserId(userId);
   const maxOcrMb = plan?.maxOcrMb ?? DEFAULT_MAX_OCR_MB;
   const trimmed = imageBase64.trim();
   if (!trimmed) {
-    throw new PlanLimitError("imageBase64 cannot be empty.", "EMPTY_IMAGE");
+    throw new LimitError("imageBase64 cannot be empty.", "EMPTY_IMAGE");
   }
   const maxBytes = maxOcrMb * 1024 * 1024;
   const approxDecodedBytes = Math.floor((trimmed.length * 3) / 4);
   if (approxDecodedBytes > maxBytes) {
     const givenMb = Math.max(1, Math.ceil(approxDecodedBytes / (1024 * 1024)));
-    throw new PlanLimitError(
+    throw new LimitError(
       `imageBase64 exceeds your plan limit of ${maxOcrMb} MB (approx ${givenMb} MB given).`,
       "IMAGE_TOO_LARGE",
     );
@@ -109,10 +102,10 @@ export async function assertChatInputWithinPlanLimits(
   for (let i = 0; i < input.length; i++) {
     const content = (input[i]?.content ?? "").trim();
     if (!content) {
-      throw new PlanLimitError(`Message ${i + 1} cannot be empty.`, "EMPTY_MESSAGE");
+      throw new LimitError(`Message ${i + 1} cannot be empty.`, "EMPTY_MESSAGE");
     }
     if (content.length > maxCharacterPerMessage) {
-      throw new PlanLimitError(
+      throw new LimitError(
         `Message ${i + 1} exceeds your plan limit of ${maxCharacterPerMessage} characters (${content.length} given).`,
       );
     }
@@ -130,7 +123,7 @@ export async function assertChatInFlightWithinPlanLimits(userId: string): Promis
   });
 
   if (count >= maxChatInFlight) {
-    throw new PlanLimitError(
+    throw new LimitError(
       `Your plan allows at most ${maxChatInFlight} in-flight chat job(s). Wait for existing jobs to finish or upgrade your plan.`,
       "TOO_MANY_IN_FLIGHT_JOBS",
     );
@@ -144,7 +137,7 @@ export async function assertChatJobAllowedForCreate(
 ): Promise<PlanSnapshot> {
   const plan = getPlanBySlugFromRegistry(auth.plan);
   if (!plan) {
-    throw new PlanLimitError("No subscription plan found.", "PLAN_NOT_FOUND");
+    throw new LimitError("No subscription plan found.", "PLAN_NOT_FOUND");
   }
   assertPlanAllowsTaskAndModel(plan, body.taskType, body.model);
   await assertChatInputWithinPlanLimits(auth.userId, body.input);

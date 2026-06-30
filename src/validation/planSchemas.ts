@@ -57,6 +57,7 @@ export const planCreateBodySchema = z.object({
   isAutoEmbed: z.boolean().optional().default(false),
   embedBadgeCustomizable: z.boolean().optional().default(false),
   ragAnalyticsEnabled: z.boolean().optional().default(false),
+  allowMcp: z.boolean().optional().default(false),
   priceLabel: z.string().trim().max(64).nullable().optional(),
   priceNote: z.string().trim().max(64).nullable().optional(),
   showOnPricingPage: z.boolean().optional().default(false),

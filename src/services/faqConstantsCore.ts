@@ -5,12 +5,9 @@ import {
   DEFAULT_EMBED_AI_DISCLAIMER,
   FaqConstantModel,
 } from "../models/faqConstant.js";
-import { UserModel } from "../models/User.js";
-import {
-  resolveEmbedAppBadgePolicy,
-  type EmbedAppBadgePolicy,
-} from "../utils/planAccess.js";
-import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
+import { DEFAULT_CHAT_SYSTEM_GUARDRAILS } from "../constants/chatSystemGuardrails.js";
+import { resolveEmbedAppBadgePolicy, type EmbedAppBadgePolicy } from "../utils/planAccess.js";
+import { getEffectivePlanForUserId } from "../services/planRegistry.js";
 
 export async function loadOrCreateDoc(userId: mongoose.Types.ObjectId, apiKeyId: mongoose.Types.ObjectId) {
   let doc = await FaqConstantModel.findOne({ userId, apiKeyId });
@@ -23,24 +20,20 @@ export async function loadOrCreateDoc(userId: mongoose.Types.ObjectId, apiKeyId:
 export const EMBED_PLAN_REQUIRED = "EMBED_PLAN_REQUIRED";
 
 export async function assertUserPlanAllowsPublicEmbed(userId: mongoose.Types.ObjectId): Promise<void> {
-  const u = await UserModel.findById(userId).select("plan planExpiresAt").lean();
-  const plan = u ? resolveEffectivePlanForUser(u) : undefined;
+  const plan = await getEffectivePlanForUserId(userId);
   if (!plan?.isAutoEmbed) {
     throw new Error(EMBED_PLAN_REQUIRED);
   }
 }
 
 export async function userPlanEligibleForPublicEmbed(userId: mongoose.Types.ObjectId): Promise<boolean> {
-  const u = await UserModel.findById(userId).select("plan planExpiresAt").lean();
-  if (!u) return false;
-  const plan = resolveEffectivePlanForUser(u);
+  const plan = await getEffectivePlanForUserId(userId);
   return Boolean(plan?.isAutoEmbed);
 }
 
 export async function getEmbedAppBadgePolicyForUser(userId: mongoose.Types.ObjectId): Promise<EmbedAppBadgePolicy> {
-  const u = await UserModel.findById(userId).select("plan planExpiresAt").lean();
-  const plan = u ? resolveEffectivePlanForUser(u) : null;
-  return resolveEmbedAppBadgePolicy(plan ?? null);
+  const plan = await getEffectivePlanForUserId(userId);
+  return resolveEmbedAppBadgePolicy(plan);
 }
 
 export type EmbedInfoLike = {
@@ -52,6 +45,8 @@ export type EmbedInfoLike = {
   aiDisclaimer?: string | null;
   furtherInfoLink?: { label?: string | null; url?: string | null } | null;
   appBadge?: { enabled?: boolean | null; label?: string | null } | null;
+  ragTone?: string | null;
+  ragGuardrails?: string | null;
 } | null | undefined;
 
 export type FaqEmbedFurtherInfoLink = { label: string; url: string } | null;
@@ -172,4 +167,26 @@ const HEX_COLOR = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 export function validateOptionalHexColor(v: string | null | undefined): void {
   if (v == null || v === "") return;
   if (!HEX_COLOR.test(v)) throw new Error("embedColor must be a hex color (#RGB, #RRGGBB, or #RRGGBBAA).");
+}
+
+export type RagSystemLayers = {
+  guardrails: string;
+  tone: string | null;
+};
+
+/** RAG-only system layers; ignores stored custom text when plan is not embedBadgeCustomizable. */
+export async function resolveRagSystemLayers(
+  userId: mongoose.Types.ObjectId,
+  apiKeyId: mongoose.Types.ObjectId,
+): Promise<RagSystemLayers> {
+  const plan = await getEffectivePlanForUserId(userId);
+  const policy = resolveEmbedAppBadgePolicy(plan);
+  if (policy !== "customizable") {
+    return { guardrails: DEFAULT_CHAT_SYSTEM_GUARDRAILS, tone: null };
+  }
+  const doc = await FaqConstantModel.findOne({ userId, apiKeyId }).select("embedInfo").lean();
+  const info = doc?.embedInfo as EmbedInfoLike;
+  const guardrails = nilStr(info?.ragGuardrails) ?? DEFAULT_CHAT_SYSTEM_GUARDRAILS;
+  const tone = nilStr(info?.ragTone);
+  return { guardrails, tone };
 }

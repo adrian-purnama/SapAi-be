@@ -8,21 +8,17 @@ import { UserModel } from "../models/User.js";
 import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
 import { applyExpiredPlanDowngradeIfNeeded } from "../services/userPlanExpiryService.js";
 import { sha256Hex } from "../utils/sha256.js";
-
-export function headerString(h: string | string[] | undefined): string | undefined {
-  if (h === undefined) return undefined;
-  return Array.isArray(h) ? h[0] : h;
-}
+import { firstHeader } from "../utils/requestHeaders.js";
 
 export function getClientIp(request: FastifyRequest): string | null {
   const trustProxy = process.env.TRUST_PROXY === "true";
   if (trustProxy) {
-    const xff = headerString(request.headers["x-forwarded-for"]);
+    const xff = firstHeader(request.headers["x-forwarded-for"]);
     if (xff) {
       const first = xff.split(",")[0]?.trim();
       if (first) return first;
     }
-    const xrip = headerString(request.headers["x-real-ip"]);
+    const xrip = firstHeader(request.headers["x-real-ip"]);
     if (xrip?.trim()) return xrip.trim();
     if (request.ip?.trim()) return request.ip.trim();
   }
@@ -40,7 +36,7 @@ export type ApiKeyAuthFailure = {
 };
 
 /**
- * Resolves a raw API key string (same semantics as `x-api-key` header) for HTTP or WebSocket.
+ * Resolves a raw API key string (same semantics as `x-api-key` header) for HTTP.
  * Applies rate limit, IP allowlist, user block checks, and bumps `lastUsedAt` on success.
  */
 export async function authenticatePlainApiKey(
@@ -160,8 +156,8 @@ export async function authenticatePlainApiKey(
 
 /** Validates `x-api-key`; sets `request.apiAuth` on success. */
 export async function requireApiKey(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const raw = headerString(request.headers["x-api-key"]);
-  const result = await authenticatePlainApiKey(raw ?? "", request);
+  const raw = firstHeader(request.headers["x-api-key"]) ?? "";
+  const result = await authenticatePlainApiKey(raw, request);
   if (!result.ok) {
     await reply.code(result.failure.status).send(result.failure.body);
     return;

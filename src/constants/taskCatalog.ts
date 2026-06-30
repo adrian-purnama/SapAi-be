@@ -8,7 +8,7 @@ export const MODELS = {
   OCT3Q: { provider: "ollama", id: "gemma4:12b" },
   TRANSLATE: { provider: "ollama", id: "translategemma", env: "OLLAMA_TRANSLATE_MODEL" },
   ocr: { provider: "ollama", id: "glm-ocr:bf16" },
-  EMBED: { provider: "ollama", id: "nomic-embed-text" },
+  EMBED: { provider: "ollama", id: "qwen3-embedding:4b" },
 } as const satisfies Record<string, ModelDef>;
 
 export type ModelLabel = keyof typeof MODELS;

@@ -2,7 +2,8 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import mongoose from "mongoose";
 
 import type { ApiKeyAuthFailure } from "./requireApiKey.js";
-import { getClientIp, headerString, requireApiKey } from "./requireApiKey.js";
+import { getClientIp, requireApiKey } from "./requireApiKey.js";
+import { firstHeader } from "../utils/requestHeaders.js";
 import { getRateLimitPerMinuteForUserPlan, tryConsumeApiKeyRateSlot } from "./apiKeyRateLimit.js";
 import { ApiKeyModel } from "../models/ApiKey.js";
 import { findFaqConstantByEmbedToken } from "../utils/embedTokenLookup.js";
@@ -146,7 +147,7 @@ export async function authenticatePlainEmbedToken(
 }
 
 export async function requireEmbedToken(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const raw = headerString(request.headers["x-embed-token"]);
+  const raw = firstHeader(request.headers["x-embed-token"]);
   const result = await authenticatePlainEmbedToken(raw ?? "", request);
   if (!result.ok) {
     await reply.code(result.failure.status).send(result.failure.body);
@@ -159,7 +160,7 @@ export async function requireApiKeyOrEmbedToken(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const raw = headerString(request.headers["x-embed-token"]);
+  const raw = firstHeader(request.headers["x-embed-token"]);
   if (raw?.trim()) {
     const result = await authenticatePlainEmbedToken(raw.trim(), request);
     if (!result.ok) {

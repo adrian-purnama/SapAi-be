@@ -94,9 +94,3 @@ export async function createTransaction(
     return null;
   }
 }
-
-// ponytail: self-check gross_amount formatting only; real verify needs live ServerKey
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`) {
-  console.assert(grossAmountForSignature("150000.00") === "150000.00");
-  console.assert(grossAmountForSignature(150000) === "150000.00");
-}

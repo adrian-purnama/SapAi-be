@@ -11,6 +11,8 @@ import {
   MAX_EMBED_ASSISTANT_NAME_LEN,
   MAX_EMBED_FURTHER_INFO_LABEL_LEN,
   MAX_EMBED_FURTHER_INFO_URL_LEN,
+  MAX_EMBED_RAG_GUARDRAILS_LEN,
+  MAX_EMBED_RAG_TONE_LEN,
   FaqConstantModel,
 } from "../models/faqConstant.js";
 import { UserModel } from "../models/User.js";
@@ -18,10 +20,13 @@ import {
   assertAndNormalizeEmbedAllowedOrigins,
   buildEmbedFrameAncestors,
 } from "../utils/embedAllowedOrigins.js";
-import { type EmbedAppBadgePolicy } from "../utils/planAccess.js";
-import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
+import {
+  resolveEmbedAppBadgePolicy,
+  type EmbedAppBadgePolicy,
+} from "../utils/planAccess.js";
+import { resolveEffectivePlanForUser, type PlanSnapshot } from "../services/planRegistry.js";
 import { findFaqConstantByEmbedTokenQuery } from "../utils/embedTokenLookup.js";
-import { deletePublicFile } from "./publicFilesService.js";
+import { deletePublicFile, updatePublicFile } from "./publicFilesService.js";
 import {
   appBadgeEnabledRaw,
   appBadgeLabelRaw,
@@ -34,8 +39,55 @@ import {
   validateFurtherInfoUrl,
   validateOptionalHexColor,
   type EmbedInfoLike,
+  type FaqEmbedBrandingFields,
   type FaqEmbedFurtherInfoLink,
 } from "./faqConstantsCore.js";
+
+export type { FaqEmbedBrandingFields } from "./faqConstantsCore.js";
+
+export type ActiveEmbedContext = {
+  token: string;
+  apiKeyId: mongoose.Types.ObjectId;
+  userId: mongoose.Types.ObjectId;
+  plan: PlanSnapshot;
+  faqDoc: Record<string, unknown>;
+};
+
+/** FaqConstant → ApiKey → userId (no plan gate). */
+export async function resolveEmbedTokenChain(
+  rawToken: string,
+  faqSelect: string,
+): Promise<Omit<ActiveEmbedContext, "plan"> | null> {
+  const token = rawToken.trim();
+  if (!token) return null;
+  const lookup = findFaqConstantByEmbedTokenQuery(token);
+  if (!lookup) return null;
+  const select = faqSelect.includes("apiKeyId") ? faqSelect : `apiKeyId ${faqSelect}`;
+  const doc = await FaqConstantModel.findOne(lookup).select(select).lean();
+  if (!doc?.apiKeyId) return null;
+  const apiKey = await ApiKeyModel.findOne({ _id: doc.apiKeyId, revokedAt: null }).select("userId").lean();
+  if (!apiKey?.userId) return null;
+  return {
+    token,
+    apiKeyId: doc.apiKeyId as mongoose.Types.ObjectId,
+    userId: apiKey.userId as mongoose.Types.ObjectId,
+    faqDoc: doc as Record<string, unknown>,
+  };
+}
+
+/** Active embed token with plan eligibility (`isAutoEmbed`, user not blocked). */
+export async function resolveActiveEmbedContext(
+  rawToken: string,
+  faqSelect = "apiKeyId",
+): Promise<ActiveEmbedContext | null> {
+  const chain = await resolveEmbedTokenChain(rawToken, faqSelect);
+  if (!chain) return null;
+  const user = await UserModel.findById(chain.userId).select("plan planExpiresAt isBlocked").lean();
+  if (!user || user.isBlocked) return null;
+  const plan = resolveEffectivePlanForUser(user);
+  if (!plan?.isAutoEmbed) return null;
+  return { ...chain, plan };
+}
 
 export type FaqEmbedFlags = {
   embedEnabled: boolean;
@@ -59,6 +111,11 @@ export type FaqEmbedFlags = {
   appBadgeEnabled: boolean | null;
   appBadgeLabel: string | null;
   aiDisclaimerEditable: boolean;
+  /** RAG tone override (Scale only); null when not editable. */
+  ragTone: string | null;
+  /** RAG guardrails override (Scale only); null when not editable. */
+  ragGuardrails: string | null;
+  ragPromptEditable: boolean;
 };
 
 export async function getFaqEmbedFlags(
@@ -81,6 +138,7 @@ export async function getFaqEmbedFlags(
   const embedPlanEligible = await userPlanEligibleForPublicEmbed(userId);
   const badgeEnabled = appBadgeEnabledRaw(info);
   const disclaimerEditable = policy === "customizable" && badgeEnabled;
+  const ragPromptEditable = policy === "customizable";
   return {
     embedEnabled: Boolean(doc?.embedEnabled),
     hasToken,
@@ -98,6 +156,9 @@ export async function getFaqEmbedFlags(
     appBadgeEnabled: policy === "customizable" ? badgeEnabled : null,
     appBadgeLabel: policy === "customizable" ? appBadgeLabelRaw(info) : null,
     aiDisclaimerEditable: disclaimerEditable,
+    ragTone: ragPromptEditable ? nilStr(info?.ragTone) : null,
+    ragGuardrails: ragPromptEditable ? nilStr(info?.ragGuardrails) : null,
+    ragPromptEditable,
   };
 }
 
@@ -146,32 +207,53 @@ export async function rotateEmbedToken(
 }
 
 export async function isEmbedTokenActive(rawToken: string): Promise<boolean> {
-  const token = rawToken.trim();
-  if (!token) return false;
-  const doc = await FaqConstantModel.findOne({ embedToken: token, embedEnabled: true }).select("apiKeyId").lean();
-  if (!doc?.apiKeyId) return false;
-  const apiKey = await ApiKeyModel.findOne({ _id: doc.apiKeyId, revokedAt: null }).select("userId").lean();
-  if (!apiKey?.userId) return false;
-  const user = await UserModel.findById(apiKey.userId).select("plan planExpiresAt isBlocked").lean();
-  if (!user || user.isBlocked) return false;
-  const plan = resolveEffectivePlanForUser(user);
-  return Boolean(plan?.isAutoEmbed);
+  return (await resolveActiveEmbedContext(rawToken)) !== null;
 }
 
 /**
  * CSP `frame-ancestors` token list for an active embed token, or `null` if invalid/disabled.
  */
 export async function getEmbedFrameAncestorsForRawToken(rawToken: string): Promise<string[] | null> {
-  const token = rawToken.trim();
-  if (!token) return null;
-  if (!(await isEmbedTokenActive(token))) return null;
-  const lookup = findFaqConstantByEmbedTokenQuery(token);
-  if (!lookup) return null;
-  const doc = await FaqConstantModel.findOne(lookup).select("embedAllowedOrigins").lean();
-  if (!doc) return null;
-  const originsRaw = Array.isArray(doc.embedAllowedOrigins) ? doc.embedAllowedOrigins.map((x) => String(x)) : [];
+  const ctx = await resolveActiveEmbedContext(rawToken, "embedAllowedOrigins");
+  if (!ctx) return null;
+  const originsRaw = Array.isArray(ctx.faqDoc.embedAllowedOrigins)
+    ? ctx.faqDoc.embedAllowedOrigins.map((x) => String(x))
+    : [];
   const extras = [...new Set(originsRaw.map((x) => x.trim()).filter(Boolean))];
   return buildEmbedFrameAncestors(extras);
+}
+
+export async function getPublicEmbedBrandingForActiveToken(
+  rawToken: string,
+  resolveFileUrl: (path: string | null) => string | null,
+): Promise<FaqEmbedBrandingFields | null> {
+  const ctx = await resolveActiveEmbedContext(rawToken, "embedInfo apiKeyId");
+  if (!ctx) return null;
+  const policy = resolveEmbedAppBadgePolicy(ctx.plan);
+  return embedInfoToBrandingPayload(ctx.faqDoc.embedInfo as EmbedInfoLike, resolveFileUrl, policy);
+}
+
+export async function replaceFaqEmbedAssistantPicture(
+  userId: mongoose.Types.ObjectId,
+  apiKeyId: mongoose.Types.ObjectId,
+  file: { buffer: Buffer; filename: string; mimetype: string },
+  resolveFileUrl: (path: string | null) => string | null,
+): Promise<FaqEmbedFlags> {
+  const doc = await loadOrCreateDoc(userId, apiKeyId);
+  const ei = doc.get("embedInfo") as
+    | { assistantProfilePicture?: { fileId?: string | null } | null }
+    | undefined;
+  const prevId =
+    typeof ei?.assistantProfilePicture?.fileId === "string" && ei.assistantProfilePicture.fileId.trim() !== ""
+      ? ei.assistantProfilePicture.fileId.trim()
+      : null;
+  const uploaded = await updatePublicFile(prevId, file.buffer, {
+    originalFilename: file.filename || "assistant-avatar",
+    contentType: file.mimetype || "application/octet-stream",
+  });
+  doc.set("embedInfo.assistantProfilePicture", { fileId: uploaded.fileId, url: uploaded.urlPath });
+  await doc.save();
+  return getFaqEmbedFlags(userId, apiKeyId, { resolveFileUrl });
 }
 
 export type FaqEmbedUiPatch = {
@@ -183,6 +265,8 @@ export type FaqEmbedUiPatch = {
   furtherInfoLink?: { label: string | null; url: string | null } | null;
   appBadge?: { enabled: boolean; label: string | null } | null;
   clearAssistantAvatar?: boolean;
+  ragTone?: string | null;
+  ragGuardrails?: string | null;
 };
 
 export async function setFaqEmbedUiSettings(
@@ -205,6 +289,18 @@ export async function setFaqEmbedUiSettings(
     }
     if (policy !== "customizable" && patch.appBadge !== undefined) {
       throw new Error("App badge cannot be customized on this plan.");
+    }
+  }
+
+  if (patch.ragTone !== undefined || patch.ragGuardrails !== undefined) {
+    const triesRagTone =
+      patch.ragTone !== undefined && patch.ragTone !== null && String(patch.ragTone).trim() !== "";
+    const triesRagGuardrails =
+      patch.ragGuardrails !== undefined &&
+      patch.ragGuardrails !== null &&
+      String(patch.ragGuardrails).trim() !== "";
+    if (policy !== "customizable" && (triesRagTone || triesRagGuardrails)) {
+      throw new Error("RAG tone and guardrails cannot be customized on this plan.");
     }
   }
 
@@ -266,6 +362,20 @@ export async function setFaqEmbedUiSettings(
       throw new Error(`aiDisclaimer must be at most ${MAX_EMBED_AI_DISCLAIMER_LEN} characters.`);
     }
     doc.set("embedInfo.aiDisclaimer", v);
+  }
+  if (patch.ragTone !== undefined && policy === "customizable") {
+    const v = patch.ragTone === null ? null : String(patch.ragTone).trim() || null;
+    if (v && v.length > MAX_EMBED_RAG_TONE_LEN) {
+      throw new Error(`ragTone must be at most ${MAX_EMBED_RAG_TONE_LEN} characters.`);
+    }
+    doc.set("embedInfo.ragTone", v);
+  }
+  if (patch.ragGuardrails !== undefined && policy === "customizable") {
+    const v = patch.ragGuardrails === null ? null : String(patch.ragGuardrails).trim() || null;
+    if (v && v.length > MAX_EMBED_RAG_GUARDRAILS_LEN) {
+      throw new Error(`ragGuardrails must be at most ${MAX_EMBED_RAG_GUARDRAILS_LEN} characters.`);
+    }
+    doc.set("embedInfo.ragGuardrails", v);
   }
   if (patch.furtherInfoLink !== undefined) {
     if (patch.furtherInfoLink === null) {

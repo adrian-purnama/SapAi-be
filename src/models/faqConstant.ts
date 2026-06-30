@@ -14,6 +14,8 @@ export const MAX_EMBED_AI_DISCLAIMER_LEN = 500;
 export const MAX_EMBED_FURTHER_INFO_LABEL_LEN = 80;
 export const MAX_EMBED_FURTHER_INFO_URL_LEN = 2048;
 export const MAX_EMBED_APP_BADGE_LABEL_LEN = 80;
+export const MAX_EMBED_RAG_TONE_LEN = 1000;
+export const MAX_EMBED_RAG_GUARDRAILS_LEN = 2000;
 
 /** Shown on the public embed when `embedInfo.aiDisclaimer` is unset. */
 export const DEFAULT_EMBED_AI_DISCLAIMER =
@@ -67,6 +69,10 @@ const embedInfoSchema = new mongoose.Schema(
     furtherInfoLink: { type: furtherInfoLinkSchema, default: undefined },
     /** Plan-governed SapAi branding badge (Scale may disable or customize label). */
     appBadge: { type: appBadgeSchema, default: undefined },
+    /** RAG tone instruction (Scale / embedBadgeCustomizable); empty = none. */
+    ragTone: { type: String, default: null, maxlength: MAX_EMBED_RAG_TONE_LEN },
+    /** RAG guardrails override; empty = platform default at runtime. */
+    ragGuardrails: { type: String, default: null, maxlength: MAX_EMBED_RAG_GUARDRAILS_LEN },
   },
   { _id: false },
 );

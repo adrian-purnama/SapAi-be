@@ -52,6 +52,8 @@ const planSchema = new mongoose.Schema(
     /** When true (Scale), embed app badge can be hidden or relabeled; Pro keeps fixed badge. */
     embedBadgeCustomizable: { type: Boolean, default: false },
     ragAnalyticsEnabled: { type: Boolean, default: false },
+    /** When true, projects may connect to external MCP servers as a client. */
+    allowMcp: { type: Boolean, default: false },
 
     /** Optional display pricing (minor units or arbitrary; interpret in admin UI). */
     priceLabel: { type: String, default: null, trim: true, maxlength: 64 },

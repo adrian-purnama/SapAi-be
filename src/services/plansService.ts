@@ -71,6 +71,7 @@ export async function createPlan(input: PlanCreateBody): Promise<PlanSnapshot> {
     isAutoEmbed: input.isAutoEmbed ?? false,
     embedBadgeCustomizable: input.embedBadgeCustomizable ?? false,
     ragAnalyticsEnabled: input.ragAnalyticsEnabled ?? false,
+    allowMcp: input.allowMcp ?? false,
     priceLabel: normalizeOptionalPrice(input.priceLabel) ?? null,
     priceNote: normalizeOptionalPrice(input.priceNote) ?? null,
     showOnPricingPage: input.showOnPricingPage ?? false,
@@ -115,6 +116,7 @@ export async function updatePlan(id: string, input: PlanPatchBody): Promise<Plan
     doc.embedBadgeCustomizable = input.embedBadgeCustomizable;
   }
   if (input.ragAnalyticsEnabled !== undefined) doc.ragAnalyticsEnabled = input.ragAnalyticsEnabled;
+  if (input.allowMcp !== undefined) doc.allowMcp = input.allowMcp;
   if (input.priceLabel !== undefined) doc.priceLabel = normalizeOptionalPrice(input.priceLabel);
   if (input.priceNote !== undefined) doc.priceNote = normalizeOptionalPrice(input.priceNote);
   if (input.showOnPricingPage !== undefined) doc.showOnPricingPage = input.showOnPricingPage;

@@ -5,6 +5,7 @@ import {
   type UserPlanHistoryKind,
   type UserPlanHistoryLean,
 } from "../models/UserPlanHistory.js";
+import { toIso } from "../utils/chatJobMappers.js";
 
 export type PlanHistoryEntry = {
   id: string;
@@ -18,12 +19,6 @@ export type PlanHistoryEntry = {
   actor: "admin" | "system";
   occurredAt: string;
 };
-
-function toIso(d: unknown): string | null {
-  if (!d) return null;
-  const t = d instanceof Date ? d : new Date(String(d));
-  return Number.isNaN(t.getTime()) ? null : t.toISOString();
-}
 
 function formatDateLabel(iso: string | null): string {
   if (!iso) return "";

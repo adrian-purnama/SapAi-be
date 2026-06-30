@@ -70,6 +70,8 @@ const embedUiPatchBodySchema = z
     furtherInfoLink: furtherInfoLinkPatchSchema.optional(),
     appBadge: appBadgePatchSchema.optional(),
     clearAssistantAvatar: z.boolean().optional(),
+    ragTone: z.union([z.string().max(1000), z.null()]).optional(),
+    ragGuardrails: z.union([z.string().max(2000), z.null()]).optional(),
   })
   .refine(
     (v) =>
@@ -80,7 +82,9 @@ const embedUiPatchBodySchema = z
       v.aiDisclaimer !== undefined ||
       v.furtherInfoLink !== undefined ||
       v.appBadge !== undefined ||
-      v.clearAssistantAvatar === true,
+      v.clearAssistantAvatar === true ||
+      v.ragTone !== undefined ||
+      v.ragGuardrails !== undefined,
     { message: "Provide at least one embed UI field to update." },
   );
 

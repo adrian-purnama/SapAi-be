@@ -35,44 +35,83 @@ const chatMessageSchema = z.object({
   content: z.string().trim().min(1, "Message cannot be empty"),
 });
 
-const chatBodySchema = z.object({
-  taskType: z.literal("chat"),
-  model: chatModelEnum,
-  input: z
-    .array(chatMessageSchema)
-    .min(1, "At least one message is required")
-    .max(MAX_CHAT_INPUT_MESSAGES),
-  maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
-  outputJsonTemplate: z.string().max(MAX_CHAT_OUTPUT_JSON_TEMPLATE_CHARS).optional(),
-});
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/;
 
-const ragBodySchema = z.object({
-  taskType: z.literal("rag"),
-  model: ragModelEnum,
-  input: z
-    .array(chatMessageSchema)
-    .min(1, "At least one message is required")
-    .max(MAX_CHAT_INPUT_MESSAGES),
-  maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
-  outputJsonTemplate: z.string().max(MAX_CHAT_OUTPUT_JSON_TEMPLATE_CHARS).optional(),
-});
+const chatSessionFields = {
+  sessionId: z.string().trim().min(1).optional(),
+  generateSessionId: z.boolean().optional(),
+};
 
-const translateBodySchema = z.object({
-  taskType: z.literal("translate"),
-  sourceLang: z.string().trim().min(1, "sourceLang is required"),
-  sourceCode: z.string().trim().min(2, "sourceCode is required").max(12),
-  targetLang: z.string().trim().min(1, "targetLang is required"),
-  targetCode: z.string().trim().min(2, "targetCode is required").max(12),
-  text: z.string().trim().min(1, "text is required"),
-  maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
-});
+function refineChatSessionFields(
+  val: { sessionId?: string; generateSessionId?: boolean },
+  ctx: z.RefinementCtx,
+): void {
+  if (val.sessionId && val.generateSessionId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Use sessionId or generateSessionId, not both.",
+      path: ["sessionId"],
+    });
+  }
+  if (val.sessionId && !OBJECT_ID_RE.test(val.sessionId)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "sessionId must be a valid MongoDB ObjectId.",
+      path: ["sessionId"],
+    });
+  }
+}
 
-const ocrBodySchema = z.object({
-  taskType: z.literal("ocr"),
-  imageBase64: z.string().min(1, "imageBase64 is required"),
-  mode: z.enum(["text", "formula", "table"]).optional().default("text"),
-  maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
-});
+const chatBodySchema = z
+  .object({
+    taskType: z.literal("chat"),
+    model: chatModelEnum,
+    input: z
+      .array(chatMessageSchema)
+      .min(1, "At least one message is required")
+      .max(MAX_CHAT_INPUT_MESSAGES),
+    maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
+    outputJsonTemplate: z.string().max(MAX_CHAT_OUTPUT_JSON_TEMPLATE_CHARS).optional(),
+    ...chatSessionFields,
+  })
+  .superRefine(refineChatSessionFields);
+
+const ragBodySchema = z
+  .object({
+    taskType: z.literal("rag"),
+    model: ragModelEnum,
+    input: z
+      .array(chatMessageSchema)
+      .min(1, "At least one message is required")
+      .max(MAX_CHAT_INPUT_MESSAGES),
+    maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
+    outputJsonTemplate: z.string().max(MAX_CHAT_OUTPUT_JSON_TEMPLATE_CHARS).optional(),
+    ...chatSessionFields,
+  })
+  .superRefine(refineChatSessionFields);
+
+const translateBodySchema = z
+  .object({
+    taskType: z.literal("translate"),
+    sourceLang: z.string().trim().min(1, "sourceLang is required"),
+    sourceCode: z.string().trim().min(2, "sourceCode is required").max(12),
+    targetLang: z.string().trim().min(1, "targetLang is required"),
+    targetCode: z.string().trim().min(2, "targetCode is required").max(12),
+    text: z.string().trim().min(1, "text is required"),
+    maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
+    ...chatSessionFields,
+  })
+  .superRefine(refineChatSessionFields);
+
+const ocrBodySchema = z
+  .object({
+    taskType: z.literal("ocr"),
+    imageBase64: z.string().min(1, "imageBase64 is required"),
+    mode: z.enum(["text", "formula", "table"]).optional().default("text"),
+    maxTokens: z.number().int().min(1).max(MAX_CHAT_MAX_TOKENS).optional(),
+    ...chatSessionFields,
+  })
+  .superRefine(refineChatSessionFields);
 
 export const chatJobCreateBodySchema = z.discriminatedUnion("taskType", [
   chatBodySchema,

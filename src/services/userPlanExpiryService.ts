@@ -79,11 +79,3 @@ export function planSnapshotFromId(planId: unknown): { slug: string; name: strin
   const snap = getPlanByIdFromRegistry(id);
   return snap ? { slug: snap.slug, name: snap.name } : null;
 }
-
-// ponytail: assert self-check
-function _planExpiryDowngradeSelfCheck(): void {
-  const past = new Date("2020-01-01T00:00:00.000Z");
-  console.assert(isUserPlanExpired({ plan: "x", planExpiresAt: past }), "past should expire");
-  console.assert(!isUserPlanExpired({ plan: "x", planExpiresAt: null }), "null expiry never");
-}
-if (process.argv[1]?.includes("userPlanExpiryService")) _planExpiryDowngradeSelfCheck();

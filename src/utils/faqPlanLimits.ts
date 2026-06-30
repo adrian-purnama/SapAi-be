@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
 
 import { FaqDocumentModel } from "../models/FaqDocument.js";
-import { UserModel } from "../models/User.js";
-import { resolveEffectivePlanForUser } from "../services/planRegistry.js";
+import { getEffectivePlanForUserId } from "../services/planRegistry.js";
+import { LimitError } from "./limitError.js";
 
 const DEFAULT_MAX_PDF_MB = 15;
 const DEFAULT_MAX_PDF_COUNT = 5;
@@ -14,19 +14,10 @@ export type FaqPlanLimits = {
   maxPdfUpload: number;
 };
 
-export class FaqPlanLimitError extends Error {
-  readonly code: string;
-
-  constructor(message: string, code: string) {
-    super(message);
-    this.name = "FaqPlanLimitError";
-    this.code = code;
-  }
-}
+export { LimitError as FaqPlanLimitError };
 
 export async function getFaqLimitsForUser(userId: mongoose.Types.ObjectId): Promise<FaqPlanLimits> {
-  const user = await UserModel.findById(userId).select("plan planExpiresAt").lean();
-  const plan = resolveEffectivePlanForUser({ plan: user?.plan, planExpiresAt: user?.planExpiresAt });
+  const plan = await getEffectivePlanForUserId(userId);
   const maxPdfMb = plan?.maxPdfMb ?? DEFAULT_MAX_PDF_MB;
   const maxPdfUpload = plan?.maxPdfUpload ?? DEFAULT_MAX_PDF_COUNT;
   return {
@@ -47,7 +38,7 @@ export async function assertFaqUploadAllowed(
   const limits = await getFaqLimitsForUser(userId);
 
   if (fileSizeBytes > limits.maxBytes) {
-    throw new FaqPlanLimitError(
+    throw new LimitError(
       `File too large. Maximum size for your plan is ${limits.maxPdfMb} MB.`,
       "FILE_TOO_LARGE",
     );
@@ -56,7 +47,7 @@ export async function assertFaqUploadAllowed(
   if (options?.isNewDocument !== false) {
     const count = await FaqDocumentModel.countDocuments({ userId, apiKeyId });
     if (count >= limits.maxCount) {
-      throw new FaqPlanLimitError(
+      throw new LimitError(
         `PDF limit reached. Your plan allows up to ${limits.maxCount} file${limits.maxCount === 1 ? "" : "s"} per project.`,
         "PDF_LIMIT_REACHED",
       );

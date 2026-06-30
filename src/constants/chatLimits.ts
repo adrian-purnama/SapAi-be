@@ -1,3 +1,6 @@
+/** Idle chat session lifetime (sliding window refreshed on assert). */
+export const RAG_SESSION_TTL_MS = 60 * 60 * 1000;
+
 /** Global caps for chat job payloads (below plan per-message limits). */
 export const MAX_CHAT_INPUT_MESSAGES = 50;
 export const MAX_CHAT_OUTPUT_JSON_TEMPLATE_CHARS = 12_000;

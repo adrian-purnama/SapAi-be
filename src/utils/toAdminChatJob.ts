@@ -1,6 +1,7 @@
 import type { Types } from "mongoose";
 
 import { lastUserMessageContent } from "./lastUserMessage.js";
+import { mapRagAnalysis, toIso, type RagAnalysisLike } from "./chatJobMappers.js";
 
 export type AdminChatJobResult = {
   text: string | null;
@@ -49,12 +50,6 @@ export type AdminChatJobSummary = Omit<
   ragAnswerable: string | null;
 };
 
-type RagAnalysisLike = {
-  category?: string | null;
-  answerable?: string | null;
-  intent?: string | null;
-} | null;
-
 type JobDocLike = {
   _id: Types.ObjectId;
   userId: Types.ObjectId | string;
@@ -82,21 +77,6 @@ type JobDocLike = {
   createdAt?: Date;
   updatedAt?: Date;
 };
-
-function toIso(d: unknown): string | null {
-  if (!d) return null;
-  const t = d instanceof Date ? d : new Date(String(d));
-  return Number.isNaN(t.getTime()) ? null : t.toISOString();
-}
-
-function mapRagAnalysis(ra: RagAnalysisLike): AdminChatJobRagAnalysis {
-  if (!ra || typeof ra !== "object") return null;
-  return {
-    category: ra.category ?? null,
-    answerable: ra.answerable ?? null,
-    intent: ra.intent ?? null,
-  };
-}
 
 function mapResult(r: JobDocLike["result"]): AdminChatJobResult {
   if (!r) return null;

@@ -1,20 +1,31 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import mongoose from "mongoose";
 
 import { requireEmbedToken } from "../auth/embedTokenAuth.js";
 import { modelLabelsForTask } from "../constants/taskCatalog.js";
+import type { NormalizedChatJobCreateBody } from "../schemas/chatJobBody.js";
 import { createAndQueueChatJob } from "../services/createChatJobFromAuth.js";
-import { PlanLimitError, planLimitHttpStatus } from "../utils/planChatLimits.js";
+import { LimitError, limitErrorHttpStatus } from "../utils/limitError.js";
 import {
   getEmbedFrameAncestorsForRawToken,
   getPublicEmbedBrandingForActiveToken,
   isEmbedTokenActive,
-} from "../services/faqConstantsService.js";
+} from "../services/faqEmbedSettings.js";
 import {
   recordEmbedVisitSafe,
   resolveEmbedVisitScope,
   type EmbedVisitKind,
 } from "../services/recordEmbedVisit.js";
+import {
+  applySessionMemoryToJob,
+  createChatSession,
+  endChatSession,
+  ChatSessionError,
+  chatSessionHttpStatus,
+  chatSessionToResponse,
+  resolveChatSessionForJob,
+} from "../services/chatSessionService.js";
 import { toAbsoluteUrlFromRequest } from "../utils/publicOriginFromRequest.js";
 import {
   isRecaptchaConfigured,
@@ -30,6 +41,7 @@ const embedChatBodySchema = z.object({
   message: z.string().trim().min(1, "Message cannot be empty"),
   model: modelEnum.optional(),
   recaptchaToken: z.string().trim().optional(),
+  sessionId: z.string().trim().min(1).optional(),
 });
 
 function readEmbedTokenFromRequest(request: FastifyRequest): string {
@@ -105,6 +117,36 @@ async function handleEmbedFramePolicy(request: FastifyRequest, reply: FastifyRep
   return sendSuccess(reply, { frameAncestors });
 }
 
+async function handleEmbedCreateSession(request: FastifyRequest, reply: FastifyReply) {
+  const auth = request.apiAuth!;
+  try {
+    const session = await createChatSession(auth.apiKeyId);
+    return sendSuccess(reply, chatSessionToResponse(session), 201);
+  } catch (err) {
+    if (err instanceof ChatSessionError) {
+      return sendError(reply, err.message, chatSessionHttpStatus(err.code), err.code);
+    }
+    throw err;
+  }
+}
+
+async function handleEmbedEndSession(request: FastifyRequest, reply: FastifyReply) {
+  const { id } = request.params as { id: string };
+  const auth = request.apiAuth!;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return sendError(reply, "Chat session not found.", 404, "SESSION_NOT_FOUND");
+  }
+  try {
+    const session = await endChatSession(auth.apiKeyId, id);
+    return sendSuccess(reply, chatSessionToResponse(session));
+  } catch (err) {
+    if (err instanceof ChatSessionError) {
+      return sendError(reply, err.message, chatSessionHttpStatus(err.code), err.code);
+    }
+    throw err;
+  }
+}
+
 async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
   const parsed = embedChatBodySchema.safeParse(request.body ?? {});
   if (!parsed.success) {
@@ -126,23 +168,56 @@ async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
 
   const auth = request.apiAuth!;
 
+  let sessionMeta;
+  try {
+    sessionMeta = await resolveChatSessionForJob({
+      apiKeyId: auth.apiKeyId,
+      sessionId: parsed.data.sessionId,
+      autoCreate: true,
+    });
+  } catch (err) {
+    if (err instanceof ChatSessionError) {
+      return sendError(reply, err.message, chatSessionHttpStatus(err.code), err.code);
+    }
+    throw err;
+  }
+
   // ponytail: default rag model is first catalog label for this task
   const model = parsed.data.model ?? RAG_MODEL_LABELS[0];
-  const body = {
+  const ragRaw = {
     taskType: "rag" as const,
     model,
     input: [{ role: "user" as const, content: parsed.data.message }],
     maxTokens: 500,
   };
+  let body: NormalizedChatJobCreateBody = {
+    taskType: "rag",
+    model,
+    input: ragRaw.input,
+    maxTokens: 500,
+  };
+
+  if (sessionMeta) {
+    body = {
+      ...body,
+      input: await applySessionMemoryToJob({
+        sessionId: sessionMeta.id,
+        raw: ragRaw,
+        merged: body,
+      }),
+    };
+  }
 
   let created;
   try {
     created = await createAndQueueChatJob(auth, body, {
       error: (obj, msg) => request.log.error(obj, msg),
+      sessionId: sessionMeta?.id,
+      session: sessionMeta ?? undefined,
     });
   } catch (err) {
-    if (err instanceof PlanLimitError) {
-      return sendError(reply, err.message, planLimitHttpStatus(err.code), err.code);
+    if (err instanceof LimitError) {
+      return sendError(reply, err.message, limitErrorHttpStatus(err.code), err.code);
     }
     throw err;
   }
@@ -165,11 +240,14 @@ async function handleEmbedChat(request: FastifyRequest, reply: FastifyReply) {
       model: created.model,
       createdAt: created.createdAt,
     },
+    ...(created.session ? chatSessionToResponse(created.session) : {}),
   });
 }
 
 export async function registerEmbedRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/v1/embed/status", handleEmbedStatus);
   fastify.get("/api/v1/embed/frame-policy", handleEmbedFramePolicy);
+  fastify.post("/api/v1/embed/sessions", { preHandler: requireEmbedToken }, handleEmbedCreateSession);
+  fastify.delete("/api/v1/embed/sessions/:id", { preHandler: requireEmbedToken }, handleEmbedEndSession);
   fastify.post("/api/v1/embed/chat", { preHandler: requireEmbedToken }, handleEmbedChat);
 }

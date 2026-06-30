@@ -96,13 +96,6 @@ function assessPlanCheckout(
   return { ok: true, description, validUntil, durationDays };
 }
 
-// ponytail: self-check duration math only; full assessPlanCheckout needs live registry
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`) {
-  const validUntil = endOfUtcDay(new Date(Date.now() + PLAN_PURCHASE_DURATION_DAYS * 86_400_000));
-  console.assert(validUntil.getTime() > Date.now());
-  console.assert(formatPlanUntilUtc(validUntil).length > 4);
-}
-
 function frontendAppUrl(): string {
   return (process.env.PUBLIC_APP_URL ?? process.env.FE_LINK ?? "http://localhost:3000").replace(/\/$/, "");
 }

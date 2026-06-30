@@ -1,10 +1,10 @@
 import type { FastifyRequest } from "fastify";
 import mongoose from "mongoose";
 
-import { ApiKeyModel } from "../models/ApiKey.js";
 import { EmbedVisitModel } from "../models/EmbedVisit.js";
-import { findFaqConstantByEmbedToken } from "../utils/embedTokenLookup.js";
-import { readEmbedVisitorIp, readVisitorLocation } from "../utils/embedVisitIp.js";
+import { getClientIp } from "../auth/requireApiKey.js";
+import { firstHeader } from "../utils/requestHeaders.js";
+import { resolveEmbedTokenChain } from "./faqEmbedSettings.js";
 
 export type EmbedVisitKind = "status" | "chat";
 
@@ -15,24 +15,25 @@ export type RecordEmbedVisitParams = {
   kind: EmbedVisitKind;
 };
 
+function readVisitorLocation(request: FastifyRequest): string | null {
+  const cf = firstHeader(request.headers["cf-ipcountry"]);
+  if (cf?.trim() && cf.trim() !== "XX") return cf.trim().toUpperCase();
+
+  const vercel = firstHeader(request.headers["x-vercel-ip-country"]);
+  if (vercel?.trim() && vercel.trim() !== "XX") return vercel.trim().toUpperCase();
+
+  return null;
+}
+
 /** Resolve project + owner from an active embed token (for status route). */
 export async function resolveEmbedVisitScope(
   rawToken: string,
 ): Promise<{ apiKeyId: string; userId: string } | null> {
-  const faqConst = await findFaqConstantByEmbedToken(rawToken);
-  if (!faqConst?.apiKeyId) return null;
-
-  const apiKey = await ApiKeyModel.findOne({
-    _id: faqConst.apiKeyId,
-    revokedAt: null,
-  })
-    .select("userId")
-    .lean();
-  if (!apiKey?.userId) return null;
-
+  const chain = await resolveEmbedTokenChain(rawToken, "apiKeyId");
+  if (!chain) return null;
   return {
-    apiKeyId: String(faqConst.apiKeyId),
-    userId: String(apiKey.userId),
+    apiKeyId: String(chain.apiKeyId),
+    userId: String(chain.userId),
   };
 }
 
@@ -40,7 +41,7 @@ export async function resolveEmbedVisitScope(
  * Upsert one row per (apiKeyId, ip). Never throws; safe to fire-and-forget.
  */
 export async function recordEmbedVisit(params: RecordEmbedVisitParams): Promise<void> {
-  const ipRaw = readEmbedVisitorIp(params.request);
+  const ipRaw = getClientIp(params.request);
   const ip = ipRaw?.trim();
   if (!ip) return;
 

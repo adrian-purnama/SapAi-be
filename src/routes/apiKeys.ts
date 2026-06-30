@@ -7,6 +7,7 @@ import { z } from "zod";
 import { requireBearerUser } from "../auth/requireBearerUser.js";
 import { ApiKeyModel } from "../models/ApiKey.js";
 import { deleteAllFaqDataForApiKeyInSession } from "../services/faqDocumentsService.js";
+import { deleteMcpSettingsForApiKey } from "../services/mcpSettingsService.js";
 import { deleteFaqChunkPointsByApiKeyFromQdrant } from "../services/qdrantFaqChunksService.js";
 import { sendError, sendSuccess } from "../utils/apiResponse.js";
 import { sha256Hex } from "../utils/sha256.js";
@@ -220,6 +221,7 @@ async function handleDeleteApiKey(request: FastifyRequest, reply: FastifyReply) 
       }
 
       await deleteAllFaqDataForApiKeyInSession(apiKeyOid, user._id, session);
+      await deleteMcpSettingsForApiKey(apiKeyOid, session);
 
       existing.revokedAt = new Date();
       await existing.save({ session });
